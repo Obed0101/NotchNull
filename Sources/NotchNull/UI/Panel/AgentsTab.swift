@@ -13,12 +13,12 @@ struct AgentsTab: View {
         HStack(spacing: 10) {
             Card(padding: 8) {
                 NotchScroll {
-                    // Each provider gets an equal share of the height, centered in it, so a taller
-                    // panel balances the blocks instead of leaving the bottom empty.
+                    // Slack goes to equal spacers above and below the group, so the top and
+                    // bottom margins always match; blocks keep their natural heights and rhythm.
                     VStack(alignment: .leading, spacing: 6) {
+                        Spacer(minLength: 0)
                         if preferences.claudeUsageEnabled {
                             ProviderUsageBlock(provider: .claude)
-                                .frame(maxHeight: .infinity)
                                 .condense(delay: Motion.stagger(1))
                         }
                         if preferences.claudeUsageEnabled && preferences.codexEnabled {
@@ -26,23 +26,25 @@ struct AgentsTab: View {
                         }
                         if preferences.codexEnabled {
                             ProviderUsageBlock(provider: .codex)
-                                .frame(maxHeight: .infinity)
                                 .condense(delay: Motion.stagger(2))
                         }
                         if preferences.opencodeEnabled && (preferences.claudeUsageEnabled || preferences.codexEnabled) {
                             Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
                         }
                         if preferences.opencodeEnabled {
+                            // Absorbs the column's slack and centers in it, so this block sits
+                            // exactly midway between the separator above and the card's bottom
+                            // edge. The 2pt bridges VStack spacing (6) to card padding (8).
                             ProviderUsageBlock(provider: .opencode)
-                                .frame(maxHeight: .infinity)
                                 .condense(delay: Motion.stagger(3))
+                                .padding(.top, 2)
+                                .frame(maxHeight: .infinity)
                         }
                         ForEach(Array(separatePlans.enumerated()), id: \.element.id) { index, usage in
                             if index > 0 || preferences.claudeUsageEnabled || preferences.codexEnabled || preferences.opencodeEnabled {
                                 Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
                             }
                             PlanUsageBlock(usage: usage)
-                                .frame(maxHeight: .infinity)
                                 .condense(delay: Motion.stagger(3 + index))
                         }
                     }
@@ -53,6 +55,11 @@ struct AgentsTab: View {
                 .frame(width: preferences.panelWidth < 640 ? 172 : 240)
                 .condense(delay: Motion.stagger(3))
         }
+        // Ask the renderer for just enough extra height to fit: without this the
+        // columns overflow by a few pixels at the default panel height and fall
+        // back to scrolling. The model floors on the same value, so sizing stays
+        // deterministic before this preference propagates.
+        .panelExtraHeight(NotchTab.agents.panelExtraHeight)
     }
 }
 
@@ -334,11 +341,13 @@ private struct SessionsCard: View {
                 } else {
                     NotchScroll {
                         VStack(spacing: 2) {
+                            Spacer(minLength: 0)
                             ForEach(Array(sessions.ordered.prefix(12).enumerated()), id: \.element.id) { index, session in
                                 SessionRow(session: session)
                                     .condense(delay: Motion.stagger(index + 3))
                                     .transition(.notchContent)
                             }
+                            Spacer(minLength: 0)
                         }
                     }
                     ApprovalAlertsPrompt()

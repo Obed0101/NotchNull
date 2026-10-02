@@ -164,6 +164,23 @@ final class NotchViewModel: ObservableObject {
     }
 
     var panelContentHeight: CGFloat { CGFloat(preferences.panelHeight) }
+
+    /// Live per-tab growth requests from `.panelExtraHeight`, keyed by tab so
+    /// switching tabs never flashes the previous tab's height.
+    @Published private(set) var requestedPanelExtra: [NotchTab: CGFloat] = [:]
+
+    /// Extra open-panel height for `tab`: the static default as floor, any live
+    /// view request on top of it, capped.
+    func panelExtraHeight(for tab: NotchTab) -> CGFloat {
+        let live = min(max(requestedPanelExtra[tab] ?? 0, 0), NotchTab.maxRequestedPanelExtra)
+        return max(tab.panelExtraHeight, live)
+    }
+
+    func setRequestedPanelExtra(_ height: CGFloat, for tab: NotchTab) {
+        let clamped = min(max(height, 0), NotchTab.maxRequestedPanelExtra)
+        guard abs((requestedPanelExtra[tab] ?? 0) - clamped) > 0.01 else { return }
+        requestedPanelExtra[tab] = clamped
+    }
     /// The notch panel is never narrower than the camera housing it hangs from; an island can be any width.
     var panelWidth: CGFloat { isIsland ? CGFloat(preferences.panelWidth) : max(CGFloat(preferences.panelWidth), closedSize.width + 40) }
 
@@ -173,7 +190,7 @@ final class NotchViewModel: ObservableObject {
         case .closed:
             size = closedSize
         case .open:
-            size = CGSize(width: panelWidth, height: headerHeight + panelContentHeight)
+            size = CGSize(width: panelWidth, height: headerHeight + panelContentHeight + panelExtraHeight(for: visibleTab))
         case .drop:
             size = CGSize(width: max(panelWidth, 360), height: headerHeight + Theme.Size.dropContentHeight)
         case .activity(let kind):
