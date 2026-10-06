@@ -280,10 +280,12 @@ final class NotchViewModel: ObservableObject {
 
     func toggleSatellite(_ side: SatelliteSide) {
         satelliteWork?.cancel()
-        if expandedSatellite != side { close() }
+        let expanding = expandedSatellite != side
+        if expanding { close() }
         withAnimation(expandedSatellite == side ? Motion.close : Motion.open) {
             expandedSatellite = expandedSatellite == side ? nil : side
         }
+        if expanding { Haptics.play() }
     }
 
     private func clampedToCanvas(_ rect: CGRect) -> CGRect {
@@ -312,6 +314,7 @@ final class NotchViewModel: ObservableObject {
                 // One thing out at a time: the panel tucks back in as the card grows.
                 self.close()
                 withAnimation(Motion.open) { self.expandedSatellite = over }
+                Haptics.play()
             }
         } else if expandedSatellite != nil {
             schedule(&satelliteWork, after: Motion.hoverCloseDelay) { [weak self] in
@@ -365,7 +368,8 @@ final class NotchViewModel: ObservableObject {
     // MARK: Pointer
 
     /// Returns whether the pointer is over the notch or a satellite (the window stops passing
-    /// clicks through). Only the body itself opens on hover; satellites wait for a click.
+    /// clicks through). The body opens the panel on hover; satellites grow into their cards
+    /// on hover (or on click when open-on-click is set).
     @discardableResult
     func pointerMoved(to point: CGPoint) -> Bool {
         updateSatelliteHover(at: point)
@@ -405,9 +409,7 @@ final class NotchViewModel: ObservableObject {
         hoveredSatellite = nil
         // Same transaction as the phase change, so a card folding back and the panel opening move together.
         if expandedSatellite != nil { withAnimation(Motion.open) { expandedSatellite = nil } }
-        if preferences.haptics {
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-        }
+        Haptics.play()
         if activity == .needsYou { selectedTab = .agents }
         apply(Motion.open)
     }
