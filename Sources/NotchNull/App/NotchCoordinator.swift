@@ -7,6 +7,7 @@ final class NotchCoordinator {
     private let services: AppServices
     private var controllers: [CGDirectDisplayID: NotchWindowController] = [:]
     private var cancellables: Set<AnyCancellable> = []
+    private var lastWindowReplacement: [CGDirectDisplayID: Date] = [:]
 
     init(services: AppServices) {
         self.services = services
@@ -17,7 +18,18 @@ final class NotchCoordinator {
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &cancellables)
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
+            .merge(with: workspace.publisher(for: NSWorkspace.didWakeNotification))
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuild() }
+            .store(in: &cancellables)
         Preferences.shared.$displayMode
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.rebuild() } }
+            .store(in: &cancellables)
+        Preferences.shared.$selectedDisplays
             .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.rebuild() } }
@@ -35,7 +47,41 @@ final class NotchCoordinator {
     }
 
     private var primaryController: NotchWindowController? {
-        controllers.values.first { $0.model.geometry.hasHardwareNotch } ?? controllers.values.first
+        let available = NotchDisplay.connected.filter { controllers[$0.id]?.isFullscreenHidden == false }
+        guard let id = DisplaySelection.target(available, pointer: NSEvent.mouseLocation) else { return nil }
+        return controllers[id]
+    }
+
+    var windowStatus: JSONValue {
+        .array(NotchDisplay.connected.compactMap { display in
+            guard let controller = controllers[display.id], var status = controller.windowStatus.object else { return nil }
+            status["displayID"] = .number(Double(display.id))
+            status["displayName"] = .string(display.name)
+            status["hasHardwareNotch"] = .bool(display.hasNotch)
+            status["shape"] = .string(controller.model.isIsland ? "island" : "notch")
+            status["screenFrame"] = .object(["x": .number(display.frame.minX), "y": .number(display.frame.minY),
+                "width": .number(display.frame.width), "height": .number(display.frame.height)])
+            return .object(status)
+        })
+    }
+
+    private func makeController(screen: NSScreen, model: NotchViewModel? = nil) -> NotchWindowController {
+        let id = NotchGeometry.screenID(screen)
+        return NotchWindowController(screen: screen, services: services, model: model,
+            onWindowFailure: { [weak self] in self?.replaceFailedWindow(on: id) })
+    }
+
+    private func replaceFailedWindow(on id: CGDirectDisplayID) {
+        // Do not create windows repeatedly while the system itself suppresses overlays.
+        if let last = lastWindowReplacement[id], Date().timeIntervalSince(last) < 30 { return }
+        guard let old = controllers[id], !old.isFullscreenHidden,
+              let screen = eligibleScreens().first(where: { NotchGeometry.screenID($0) == id }) else { return }
+        lastWindowReplacement[id] = Date()
+        let model = old.model.geometry == NotchGeometry(screen: screen) ? old.model : nil
+        old.tearDown()
+        controllers[id] = makeController(screen: screen, model: model)
+        services.fullscreen.refresh()
+        applyFullscreenHiding()
     }
 
     func openPrimary(tab: NotchTab? = nil) {
@@ -53,16 +99,9 @@ final class NotchCoordinator {
     }
 
     private func eligibleScreens() -> [NSScreen] {
-        let screens = NSScreen.screens
-        switch Preferences.shared.displayMode {
-        case .all:
-            return screens
-        case .main:
-            return NSScreen.main.map { [$0] } ?? Array(screens.prefix(1))
-        case .builtIn:
-            if let builtIn = screens.first(where: NotchGeometry.isBuiltIn) { return [builtIn] }
-            return NSScreen.main.map { [$0] } ?? Array(screens.prefix(1))
-        }
+        let ids = Set(DisplaySelection.eligible(NotchDisplay.connected, mode: Preferences.shared.displayMode,
+            selected: Preferences.shared.selectedDisplays).map(\.id))
+        return NSScreen.screens.filter { ids.contains(NotchGeometry.screenID($0)) }
     }
 
     private func rebuild() {
@@ -76,9 +115,12 @@ final class NotchCoordinator {
             }
         }
         for (id, screen) in wanted where controllers[id] == nil {
-            controllers[id] = NotchWindowController(screen: screen, services: services)
+            controllers[id] = makeController(screen: screen)
         }
+        // Re-read fullscreen before restoring panels on a new Space or after wake.
+        services.fullscreen.refresh()
         applyFullscreenHiding()
+        NotchStatus.write()
     }
 
     /// Hides each display's notch independently while a fullscreen app covers that display.

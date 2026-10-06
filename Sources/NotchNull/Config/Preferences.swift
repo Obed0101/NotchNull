@@ -9,13 +9,14 @@ final class Preferences: ObservableObject {
     static let shared = Preferences()
 
     enum DisplayMode: String, CaseIterable, Identifiable {
-        case builtIn, main, all
+        case builtIn, main, all, selected
         var id: String { rawValue }
         var title: String {
             switch self {
             case .builtIn: "Built-in display"
             case .main: "Main display"
             case .all: "All displays"
+            case .selected: "Selected displays"
             }
         }
     }
@@ -129,6 +130,7 @@ final class Preferences: ObservableObject {
 
     // MARK: Look
     @Published var displayMode: DisplayMode { didSet { defaults.set(displayMode.rawValue, forKey: Keys.displayMode) } }
+    @Published var selectedDisplays: [String] { didSet { defaults.set(selectedDisplays, forKey: "selectedDisplays") } }
     @Published var openTrigger: OpenTrigger { didSet { defaults.set(openTrigger.rawValue, forKey: Keys.openTrigger) } }
     @Published var bodyStyle: BodyStyle { didSet { defaults.set(bodyStyle.rawValue, forKey: Keys.bodyStyle) } }
     @Published var tintHex: Int { didSet { defaults.set(tintHex, forKey: Keys.tintHex) } }
@@ -299,6 +301,7 @@ final class Preferences: ObservableObject {
             defaults.set(BodyStyle.glass.rawValue, forKey: Keys.bodyStyle)
         }
         displayMode = DisplayMode(rawValue: defaults.string(forKey: Keys.displayMode) ?? "") ?? .builtIn
+        selectedDisplays = defaults.stringArray(forKey: "selectedDisplays") ?? []
         openTrigger = OpenTrigger(rawValue: defaults.string(forKey: Keys.openTrigger) ?? "") ?? .hover
         bodyStyle = BodyStyle(rawValue: defaults.string(forKey: Keys.bodyStyle) ?? "") ?? .black
         tintHex = defaults.integer(forKey: Keys.tintHex)

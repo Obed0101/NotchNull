@@ -22,6 +22,7 @@ enum NotchAPI {
     /// Opens or closes the primary notch; set by the app delegate.
     static var openPanel: ((NotchTab?) -> Void)?
     static var closePanel: (() -> Void)?
+    static var windowStatus: (() -> JSONValue)?
 
     static func handle(_ request: AgentEventServer.Request) -> AgentEventServer.Response {
         let path = request.path.split(separator: "?").first.map(String.init) ?? request.path
@@ -129,6 +130,13 @@ enum NotchStatus {
             "widgets": .array(widgets),
             "activities": .array(CustomActivityStore.shared.items.keys.sorted().map { .string($0) }),
             "update": UpdateService.shared.summary,
+            "windows": NotchAPI.windowStatus?() ?? .array([]),
+            "displays": .array(NotchDisplay.connected.map { display in
+                .object(["displayID": .number(Double(display.id)), "uuid": .string(display.persistentID),
+                    "name": .string(display.name), "builtIn": .bool(display.builtIn),
+                    "hasHardwareNotch": .bool(display.hasNotch), "scale": .number(display.scale),
+                    "width": .number(display.frame.width), "height": .number(display.frame.height)])
+            }),
         ])
     }
 
