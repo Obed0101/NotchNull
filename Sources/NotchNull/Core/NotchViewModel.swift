@@ -7,6 +7,9 @@ enum NotchTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Room for the Agents captions without changing the user's base panel height.
+    var panelExtraHeight: CGFloat { self == .agents ? 16 : 0 }
+
     var title: String {
         switch self {
         case .home: "Home"
@@ -164,6 +167,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     var panelContentHeight: CGFloat { CGFloat(preferences.panelHeight) }
+
     /// The notch panel is never narrower than the camera housing it hangs from; an island can be any width.
     var panelWidth: CGFloat { isIsland ? CGFloat(preferences.panelWidth) : max(CGFloat(preferences.panelWidth), closedSize.width + 40) }
 
@@ -173,7 +177,7 @@ final class NotchViewModel: ObservableObject {
         case .closed:
             size = closedSize
         case .open:
-            size = CGSize(width: panelWidth, height: headerHeight + panelContentHeight)
+            size = CGSize(width: panelWidth, height: headerHeight + panelContentHeight + visibleTab.panelExtraHeight)
         case .drop:
             size = CGSize(width: max(panelWidth, 360), height: headerHeight + Theme.Size.dropContentHeight)
         case .activity(let kind):

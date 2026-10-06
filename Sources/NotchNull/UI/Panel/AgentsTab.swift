@@ -13,38 +13,36 @@ struct AgentsTab: View {
         HStack(spacing: 10) {
             Card(padding: 8) {
                 NotchScroll {
-                    // Each provider gets an equal share of the height, centered in it, so a taller
-                    // panel balances the blocks instead of leaving the bottom empty.
-                    VStack(alignment: .leading, spacing: 6) {
-                        if preferences.claudeUsageEnabled {
-                            ProviderUsageBlock(provider: .claude)
-                                .frame(maxHeight: .infinity)
-                                .condense(delay: Motion.stagger(1))
-                        }
-                        if preferences.claudeUsageEnabled && preferences.codexEnabled {
-                            Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
-                        }
-                        if preferences.codexEnabled {
-                            ProviderUsageBlock(provider: .codex)
-                                .frame(maxHeight: .infinity)
-                                .condense(delay: Motion.stagger(2))
-                        }
-                        if preferences.opencodeEnabled && (preferences.claudeUsageEnabled || preferences.codexEnabled) {
-                            Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
-                        }
-                        if preferences.opencodeEnabled {
-                            ProviderUsageBlock(provider: .opencode)
-                                .frame(maxHeight: .infinity)
-                                .condense(delay: Motion.stagger(3))
-                        }
-                        ForEach(Array(separatePlans.enumerated()), id: \.element.id) { index, usage in
-                            if index > 0 || preferences.claudeUsageEnabled || preferences.codexEnabled || preferences.opencodeEnabled {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        VStack(alignment: .leading, spacing: 6) {
+                            if preferences.claudeUsageEnabled {
+                                ProviderUsageBlock(provider: .claude)
+                                    .condense(delay: Motion.stagger(1))
+                            }
+                            if preferences.claudeUsageEnabled && preferences.codexEnabled {
                                 Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
                             }
-                            PlanUsageBlock(usage: usage)
-                                .frame(maxHeight: .infinity)
-                                .condense(delay: Motion.stagger(3 + index))
+                            if preferences.codexEnabled {
+                                ProviderUsageBlock(provider: .codex)
+                                    .condense(delay: Motion.stagger(2))
+                            }
+                            if preferences.opencodeEnabled && (preferences.claudeUsageEnabled || preferences.codexEnabled) {
+                                Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
+                            }
+                            if preferences.opencodeEnabled {
+                                ProviderUsageBlock(provider: .opencode)
+                                    .condense(delay: Motion.stagger(3))
+                            }
+                            ForEach(Array(separatePlans.enumerated()), id: \.element.id) { index, usage in
+                                if index > 0 || preferences.claudeUsageEnabled || preferences.codexEnabled || preferences.opencodeEnabled {
+                                    Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
+                                }
+                                PlanUsageBlock(usage: usage)
+                                    .condense(delay: Motion.stagger(3 + index))
+                            }
                         }
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -333,12 +331,16 @@ private struct SessionsCard: View {
                     emptyState
                 } else {
                     NotchScroll {
-                        VStack(spacing: 2) {
-                            ForEach(Array(sessions.ordered.prefix(12).enumerated()), id: \.element.id) { index, session in
-                                SessionRow(session: session)
-                                    .condense(delay: Motion.stagger(index + 3))
-                                    .transition(.notchContent)
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            VStack(spacing: 2) {
+                                ForEach(Array(sessions.ordered.prefix(12).enumerated()), id: \.element.id) { index, session in
+                                    SessionRow(session: session)
+                                        .condense(delay: Motion.stagger(index + 3))
+                                        .transition(.notchContent)
+                                }
                             }
+                            Spacer(minLength: 0)
                         }
                     }
                     ApprovalAlertsPrompt()
