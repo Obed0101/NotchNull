@@ -21,17 +21,21 @@ final class NotchWindowController {
     private var openedFromKeyboard = false
     /// A fullscreen app covers this controller's display (and the setting is on).
     private var fullscreenHidden = false
+    private var tornDown = false
+    private var failedRestores = 0
+    private let onWindowFailure: (() -> Void)?
     var isFullscreenHidden: Bool { fullscreenHidden }
 
-    init(screen: NSScreen, services: AppServices) {
+    init(screen: NSScreen, services: AppServices, model: NotchViewModel? = nil, onWindowFailure: (() -> Void)? = nil) {
         let geometry = NotchGeometry(screen: screen)
-        model = NotchViewModel(geometry: geometry)
+        self.model = model ?? NotchViewModel(geometry: geometry)
+        self.onWindowFailure = onWindowFailure
         panel = NotchPanel(frame: geometry.windowFrame)
         clipboard = services.clipboard
         picker = services.clipboardPicker
 
         let root = NotchRootView()
-            .environmentObject(model)
+            .environmentObject(self.model)
             .withServices(services)
         panel.contentView = NotchHostingView(rootView: AnyView(root))
         panel.setFrame(geometry.windowFrame, display: false)
@@ -44,7 +48,7 @@ final class NotchWindowController {
             scrolled: { [weak self] event in self?.scrolled(event) }
         ))
 
-        model.$phase
+        self.model.$phase
             .receive(on: RunLoop.main)
             .sink { [weak self] phase in
                 DispatchQueue.main.async {
@@ -59,10 +63,22 @@ final class NotchWindowController {
         NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification, object: panel)
             .sink { [weak self] _ in self?.panelResignedKey() }
             .store(in: &cancellables)
+        // AppKit's visibility flags can disagree with Window Server. Check the actual
+        // window registration instead of repeatedly ordering an already ordered window.
+        Timer.publish(every: Constants.Intervals.fullscreenPoll, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.reconcileWindowVisibility(isOnScreen: self.panel.isVisible ? self.windowServerVisibility : false)
+            }
+            .store(in: &cancellables)
         Log.window.info("Notch panel on screen \(NotchGeometry.screenID(screen)) notch=\(geometry.notchSize.width)x\(geometry.notchSize.height) hardware=\(geometry.hasHardwareNotch)")
     }
 
     func tearDown() {
+        tornDown = true
+        // Deliberately removing this display must not trigger automatic recovery.
+        cancellables.removeAll()
         removeKeyMonitor()
         PointerTracker.shared.unregister(self)
         panel.orderOut(nil)
@@ -72,19 +88,70 @@ final class NotchWindowController {
     /// Hides this display's notch while a fullscreen app covers it; the controller is kept
     /// so the notch returns instantly when fullscreen ends.
     func setFullscreenHidden(_ hidden: Bool) {
-        guard hidden != fullscreenHidden else { return }
+        guard hidden != fullscreenHidden else {
+            // AppKit can order a panel out independently during Space/display transitions.
+            // An unchanged fullscreen state must still reconcile the actual window.
+            if !hidden { restoreVisibility() }
+            return
+        }
         fullscreenHidden = hidden
         if hidden {
             model.close()
             panel.orderOut(nil)
         } else {
-            panel.orderFrontRegardless()
-            refreshHitTesting()
+            restoreVisibility()
         }
+    }
+
+    /// nil means Window Server could not be queried; it is not evidence of a hidden panel.
+    private var windowServerVisibility: Bool? {
+        guard let entries = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(panel.windowNumber)) as? [[String: Any]],
+              let entry = entries.first(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.intValue == panel.windowNumber })
+        else { return nil }
+        return (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
+    }
+
+    var windowStatus: JSONValue {
+        .object([
+            "windowNumber": .number(Double(panel.windowNumber)),
+            "appKitVisible": .bool(panel.isVisible),
+            "onActiveSpace": .bool(panel.isOnActiveSpace),
+            "windowServerVisible": windowServerVisibility.map(JSONValue.bool) ?? .null,
+            "fullscreenHidden": .bool(fullscreenHidden),
+            "failedRestores": .number(Double(failedRestores)),
+        ])
+    }
+
+    /// Takes an observed Window Server state so the failure path can be tested deterministically.
+    func reconcileWindowVisibility(isOnScreen: Bool?) {
+        guard !tornDown, !fullscreenHidden, !NSApp.isHidden, let isOnScreen else { return }
+        if isOnScreen {
+            failedRestores = 0
+            if panel.frame != model.geometry.windowFrame { restoreVisibility() }
+            return
+        }
+        failedRestores += 1
+        if failedRestores == 1 {
+            Log.window.notice("Re-registering a notch panel missing from Window Server")
+            restoreVisibility(forceReorder: true)
+        } else if failedRestores == 2 {
+            Log.window.error("Notch panel remains missing after reordering; replacing its window")
+            onWindowFailure?()
+        }
+    }
+
+    private func restoreVisibility(forceReorder: Bool = false) {
+        guard !tornDown, !fullscreenHidden else { return }
+        if forceReorder { panel.orderOut(nil) }
+        panel.setFrame(model.geometry.windowFrame, display: false)
+        panel.orderFrontRegardless()
+        refreshHitTesting()
     }
 
     func open(tab: NotchTab? = nil) {
         guard !fullscreenHidden else { return }
+        failedRestores = 0
+        restoreVisibility(forceReorder: windowServerVisibility == false)
         model.open(tab: tab)
     }
 
@@ -98,6 +165,7 @@ final class NotchWindowController {
             endKeyboardSession(restoreFocus: true)
             return
         }
+        restoreVisibility()
         openedFromKeyboard = true
         // Key first, so the search field can take focus as the tab appears.
         panel.makeKey()

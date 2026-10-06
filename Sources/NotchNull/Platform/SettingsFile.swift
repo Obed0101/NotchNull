@@ -167,7 +167,18 @@ final class SettingsFile: ObservableObject {
     ]
 
     private static let behavior: [SettingField] = [
-        choice("behavior.display", "Which displays get a notch.", \.displayMode),
+        choice("behavior.display", "Which displays get a notch. Selected uses behavior.selectedDisplays.", \.displayMode),
+        SettingField(
+            key: "behavior.selectedDisplays", type: "list of display UUIDs", summary: "Displays enabled in Selected mode. IDs are listed in status.displays and survive reconnects. An empty list hides every panel.",
+            read: { .array($0.selectedDisplays.map { .string($0) }) },
+            write: { prefs, value in
+                guard let entries = value.array, entries.allSatisfy({ $0.string.flatMap(UUID.init(uuidString:)) != nil }) else {
+                    return "expected a list of display UUIDs"
+                }
+                prefs.selectedDisplays = Array(Set(entries.compactMap(\.string).map { $0.uppercased() })).sorted()
+                return nil
+            }
+        ),
         bool("behavior.hideOnFullscreen", "Hide the notch on a display while a fullscreen app covers it.", \.hideOnFullscreen),
         bool("behavior.checkForUpdates", "Ask GitHub once a day whether a newer NotchNull exists.", \.checkForUpdates),
         bool("behavior.haptics", "Haptic tap when opening.", \.haptics),

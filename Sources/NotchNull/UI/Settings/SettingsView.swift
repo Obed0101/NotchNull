@@ -274,13 +274,6 @@ private struct GeneralSettings: View {
                 .labelsHidden()
                 .frame(width: 150)
             }
-            SettingsRow(title: "Show on", symbol: "display", tint: Theme.Accent.system) {
-                Picker("", selection: $preferences.displayMode) {
-                    ForEach(Preferences.DisplayMode.allCases) { Text($0.title).tag($0) }
-                }
-                .labelsHidden()
-                .frame(width: 170)
-            }
             SettingsToggle(title: "Hide on fullscreen apps", subtitle: "Hide the notch on a display while a fullscreen app covers it.", symbol: "rectangle.inset.filled.on.rectangle", tint: Theme.Accent.system, isOn: $preferences.hideOnFullscreen)
             SettingsToggle(title: "Haptic tap when opening", subtitle: "On Force Touch trackpads.", symbol: "hand.tap.fill", tint: Theme.Accent.tray, isOn: $preferences.haptics)
             SettingsToggle(title: "Launch at login", symbol: "power", tint: Theme.Accent.success, isOn: Binding(
@@ -291,6 +284,7 @@ private struct GeneralSettings: View {
         if let loginError {
             Text(loginError).font(.system(size: 11)).foregroundStyle(Theme.Accent.danger)
         }
+        DisplaySettings()
         SettingsGroup(title: "Extras") {
             SettingsToggle(title: "Sounds", subtitle: "Timer chime and meeting reminder.", symbol: "speaker.wave.2.fill", tint: Theme.Accent.volumeHigh, isOn: $preferences.sounds)
             SettingsToggle(title: "Say hello", subtitle: "Handwritten hello at launch and when you unlock.", symbol: "hand.wave.fill", tint: Theme.Accent.mirror, isOn: $preferences.sayHello)

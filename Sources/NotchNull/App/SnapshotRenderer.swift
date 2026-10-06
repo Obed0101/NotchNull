@@ -101,6 +101,7 @@ enum SnapshotRenderer {
         renderSettingsPage("80-settings-build", services: services, to: directory) { BuildSettings() }
         renderSettingsPage("81-settings-setup", services: services, to: directory) { SetupSettings() }
         renderSettingsPage("82-settings-style", services: services, to: directory) { StyleSettings() }
+        renderSettingsPage("85-settings-displays", services: services, to: directory) { DisplaySettings() }
         renderSettingsPage("83-settings-about", services: services, to: directory) { AboutSettings() }
         if let next = AppVersion("\(AppVersion.current.parts.first ?? 0).99.0") {
             services.updates.preview(.available(.init(version: next, page: Constants.Links.releases, asset: Constants.Links.releases, sha256: nil)))
