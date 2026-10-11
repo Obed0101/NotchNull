@@ -3,6 +3,20 @@ import XCTest
 
 @MainActor
 final class UsageFreshnessTests: XCTestCase {
+    func testUsageChecksAreTenMinutesApart() {
+        XCTAssertEqual(Constants.Agents.claudeUsageInterval, 600)
+        XCTAssertEqual(Constants.Agents.codexUsageInterval, 600)
+        XCTAssertEqual(Constants.Agents.planUsageInterval, 600)
+    }
+
+    func testCodexReadingStaysCurrentBetweenScheduledChecks() {
+        let monitor = CodexMonitor(store: AgentSessionStore())
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+        let payload: [String: Any] = ["primary": ["used_percent": 15, "window_minutes": 10080, "resets_at": 2_000_000_000]]
+        monitor.applyLimits(payload, at: now.addingTimeInterval(-599), now: now)
+        XCTAssertEqual(monitor.usage.state, .ready)
+    }
+
     func testCodexLiveResponseUsesAccountWindows() throws {
         let payload = try XCTUnwrap(CodexLimitsClient.normalize([
             "rateLimits": ["planType": "pro", "primary": ["usedPercent": 25, "windowDurationMins": 10080, "resetsAt": 2_000_000_000]]

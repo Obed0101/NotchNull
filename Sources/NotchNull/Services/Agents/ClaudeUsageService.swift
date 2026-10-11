@@ -104,7 +104,7 @@ final class ClaudeUsageService: ObservableObject {
             case 429:
                 let retryAfter = ((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init)
                 rateLimitStrikes += 1
-                let wait = retryAfter ?? min(Constants.Agents.claudeUsageMaxBackoff, Constants.Agents.claudeUsageInterval * pow(2, Double(rateLimitStrikes)))
+                let wait = max(retryAfter ?? 0, min(Constants.Agents.claudeUsageMaxBackoff, Constants.Agents.claudeUsageInterval * pow(2, Double(rateLimitStrikes))))
                 retryNotBefore = Date().addingTimeInterval(wait)
                 Log.agents.notice("Claude usage endpoint rate limited; retrying in \(Int(wait), privacy: .public)s")
                 // Keep the last good numbers; with none yet, say why instead of loading forever.

@@ -32,10 +32,11 @@ enum Constants {
         static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
         static let claudeOAuthBeta = "oauth-2025-04-20"
         static let claudeKeychainService = "Claude Code-credentials"
-        static let claudeUsageInterval: TimeInterval = 90
+        static let claudeUsageInterval: TimeInterval = 10 * 60
+        static let codexUsageInterval: TimeInterval = 10 * 60
         static let claudeUsageMaxBackoff: TimeInterval = 30 * 60
         /// Other coding subscriptions (GLM, Kimi, MiniMax, OpenCode Go, Copilot) change slowly.
-        static let planUsageInterval: TimeInterval = 180
+        static let planUsageInterval: TimeInterval = 10 * 60
         static let codexPollInterval: TimeInterval = 2
         static let codexActiveWindow: TimeInterval = 15 * 60
         static let opencodePollInterval: TimeInterval = 2

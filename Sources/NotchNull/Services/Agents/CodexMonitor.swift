@@ -86,7 +86,7 @@ final class CodexMonitor: ObservableObject {
     private func refreshAccountLimits() {
         guard !limitsInFlight, Date() >= nextLimitsRefresh else { return }
         limitsInFlight = true
-        nextLimitsRefresh = Date().addingTimeInterval(90)
+        nextLimitsRefresh = Date().addingTimeInterval(Constants.Agents.codexUsageInterval)
         limitsQueue.async { [weak self] in
             let payload = CodexLimitsClient.read()
             DispatchQueue.main.async {
@@ -327,7 +327,7 @@ final class CodexMonitor: ObservableObject {
         }
         windows.sort { ($0.duration ?? 0) < ($1.duration ?? 0) }
         let plan = (payload["plan_type"] as? String).map { $0.capitalized }
-        let stale = now.timeIntervalSince(date) > 180
+        let stale = now.timeIntervalSince(date) > 2 * Constants.Agents.codexUsageInterval
         let state: ProviderUsage.State = windows.isEmpty
             ? .unavailable("Waiting for current Codex limits")
             : stale ? .unavailable("Last known limits · awaiting refresh") : .ready

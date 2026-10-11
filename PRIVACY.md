@@ -6,16 +6,16 @@ NotchNull has no analytics, no telemetry, no accounts and no server. This page l
 
 | Request | When | What is sent |
 |---|---|---|
-| `GET https://api.anthropic.com/api/oauth/usage` | Every 90 seconds while Claude usage is enabled, after you allow the keychain read | Your existing Claude Code access token, read from the macOS keychain item `Claude Code-credentials`. NotchNull never refreshes, copies or stores the token. |
+| `GET https://api.anthropic.com/api/oauth/usage` | Every 10 minutes while Claude usage is enabled, after you allow the keychain read | Your existing Claude Code access token, read from the macOS keychain item `Claude Code-credentials`. NotchNull never refreshes, copies or stores the token. |
 | `GET https://api.github.com/repos/Obed0101/NotchNull/releases/latest` | Once a day while **Check automatically** is on (Settings › About, on by default), and when you press Check or run `notchnull update` | Nothing beyond the request itself: no token, no identifier, no version. GitHub sees your IP address, as any site does. |
 | `GET https://github.com/Obed0101/NotchNull/releases/download/…/NotchNull.zip` | Only when you press Update or run `notchnull update install` | Nothing beyond the request itself. The download is checked against GitHub's published SHA-256, the app's identifier and version, and its signature before it replaces the app. |
-| `GET https://api.z.ai/api/monitor/usage/quota/limit` (or `open.bigmodel.cn`) | Every 3 minutes, only when a GLM Coding Plan key is found | That key |
-| `GET https://api.kimi.com/coding/v1/usages` | Every 3 minutes, only when a Kimi Code key is found | That key |
-| `GET https://api.minimax.io/v1/api/openplatform/coding_plan/remains` (or `api.minimaxi.com`) | Every 3 minutes, only when a MiniMax key is found | That key |
-| `GET https://opencode.ai/zen/go/v1/usage` | Every 3 minutes, only when an OpenCode key is found | That key |
-| `GET https://api.github.com/copilot_internal/user` | Every 3 minutes, only when a Copilot sign-in is found | That GitHub token |
+| `GET https://api.z.ai/api/monitor/usage/quota/limit` (or `open.bigmodel.cn`) | Every 10 minutes, only when a GLM Coding Plan key is found | That key |
+| `GET https://api.kimi.com/coding/v1/usages` | Every 10 minutes, only when a Kimi Code key is found | That key |
+| `GET https://api.minimax.io/v1/api/openplatform/coding_plan/remains` (or `api.minimaxi.com`) | Every 10 minutes, only when a MiniMax key is found | That key |
+| `GET https://opencode.ai/zen/go/v1/usage` | Every 10 minutes, only when an OpenCode key is found | That key |
+| `GET https://api.github.com/copilot_internal/user` | Every 10 minutes, only when a Copilot sign-in is found | That GitHub token |
 
-Codex sessions and token totals are read from local files. While Codex monitoring is enabled, NotchNull also launches the installed `codex app-server --stdio` every 90 seconds and requests `account/rateLimits/read` for current account limits. Codex handles the network request and its own authentication using its existing configuration; NotchNull does not read or store Codex credentials or start model turns. If Codex is unavailable, local log limits remain a fallback and old readings are marked as last known rather than current.
+Codex sessions and token totals are read from local files. While Codex monitoring is enabled, NotchNull also launches the installed `codex app-server --stdio` every 10 minutes and requests `account/rateLimits/read` for current account limits. Codex handles the network request and its own authentication using its existing configuration; NotchNull does not read or store Codex credentials or start model turns. If Codex is unavailable, local log limits remain a fallback and old readings are marked as last known rather than current.
 
 opencode sessions are read from a local database. The other plans (Settings › Agents › Other plans, on by default) use keys your tools already saved: the `env` block of `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points at the provider, `~/.local/share/opencode/auth.json`, `~/.config/github-copilot/apps.json` / `hosts.json`, or environment variables such as `Z_AI_API_KEY`, `KIMI_CODE_API_KEY`, `MINIMAX_API_KEY` and `OPENCODE_API_KEY`. Each key is sent only to its own provider, and is never stored, copied or refreshed. With no key for a provider, nothing is sent to it.
 
