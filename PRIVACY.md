@@ -15,7 +15,9 @@ NotchNull has no analytics, no telemetry, no accounts and no server. This page l
 | `GET https://opencode.ai/zen/go/v1/usage` | Every 3 minutes, only when an OpenCode key is found | That key |
 | `GET https://api.github.com/copilot_internal/user` | Every 3 minutes, only when a Copilot sign-in is found | That GitHub token |
 
-Codex usage is read from local files. opencode sessions are read from a local database. The other plans (Settings › Agents › Other plans, on by default) use keys your tools already saved: the `env` block of `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points at the provider, `~/.local/share/opencode/auth.json`, `~/.config/github-copilot/apps.json` / `hosts.json`, or environment variables such as `Z_AI_API_KEY`, `KIMI_CODE_API_KEY`, `MINIMAX_API_KEY` and `OPENCODE_API_KEY`. Each key is sent only to its own provider, and is never stored, copied or refreshed. With no key for a provider, nothing is sent to it.
+Codex sessions and token totals are read from local files. While Codex monitoring is enabled, NotchNull also launches the installed `codex app-server --stdio` every 90 seconds and requests `account/rateLimits/read` for current account limits. Codex handles the network request and its own authentication using its existing configuration; NotchNull does not read or store Codex credentials or start model turns. If Codex is unavailable, local log limits remain a fallback and old readings are marked as last known rather than current.
+
+opencode sessions are read from a local database. The other plans (Settings › Agents › Other plans, on by default) use keys your tools already saved: the `env` block of `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points at the provider, `~/.local/share/opencode/auth.json`, `~/.config/github-copilot/apps.json` / `hosts.json`, or environment variables such as `Z_AI_API_KEY`, `KIMI_CODE_API_KEY`, `MINIMAX_API_KEY` and `OPENCODE_API_KEY`. Each key is sent only to its own provider, and is never stored, copied or refreshed. With no key for a provider, nothing is sent to it.
 
 ## Files read
 

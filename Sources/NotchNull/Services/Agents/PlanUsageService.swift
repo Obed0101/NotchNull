@@ -67,7 +67,7 @@ final class PlanUsageService: ObservableObject {
         }
     }
 
-    private func apply(_ results: [(provider: any PlanProvider, credential: PlanCredential, result: Result<PlanSnapshot, PlanError>)]) {
+    func apply(_ results: [(provider: any PlanProvider, credential: PlanCredential, result: Result<PlanSnapshot, PlanError>)]) {
         let now = Date()
         var next: [PlanUsage] = []
         for (provider, credential, result) in results {
@@ -83,8 +83,11 @@ final class PlanUsageService: ObservableObject {
             case .failure(.noSubscription):
                 continue
             case .failure(.signedOut(let message)):
+                if provider.id == OpenCodeGoPlan.planID, previous?.updatedAt == nil { continue }
                 usage.state = .signedOut(message)
             case .failure(.unavailable(let message)):
+                // Finding a generic OpenCode key is not evidence of a paid Go subscription.
+                if provider.id == OpenCodeGoPlan.planID, previous?.updatedAt == nil { continue }
                 // Keep the last good numbers through a failed refresh.
                 usage.plan = previous?.plan
                 usage.windows = previous?.windows ?? []

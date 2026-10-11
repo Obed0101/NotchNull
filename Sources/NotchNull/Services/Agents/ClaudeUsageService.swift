@@ -108,19 +108,21 @@ final class ClaudeUsageService: ObservableObject {
                 retryNotBefore = Date().addingTimeInterval(wait)
                 Log.agents.notice("Claude usage endpoint rate limited; retrying in \(Int(wait), privacy: .public)s")
                 // Keep the last good numbers; with none yet, say why instead of loading forever.
-                if usage.windows.isEmpty { update(state: .unavailable("Limits busy · retry in \(Formatting.minutes(max(1, Int(wait / 60))))")) }
+                update(state: .unavailable(Self.rateLimitMessage))
             default:
                 update(state: .unavailable("Usage service returned \(status)"))
             }
         } catch {
             Log.agents.error("Claude usage request failed: \(error.localizedDescription, privacy: .public)")
-            if usage.windows.isEmpty { update(state: .unavailable("Offline")) }
+            update(state: .unavailable("Offline · limits may be out of date"))
         }
     }
 
     private func update(state: ProviderUsage.State) {
         withAnimation(Motion.state) { usage.state = state }
     }
+
+    nonisolated static let rateLimitMessage = "Claude rate limited · retrying automatically"
 
     private func apply(_ parsed: (windows: [UsageWindow], breakdown: [UsageShare]), plan: String?) {
         withAnimation(Motion.state) {

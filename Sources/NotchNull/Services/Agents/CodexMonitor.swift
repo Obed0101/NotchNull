@@ -17,6 +17,10 @@ final class CodexMonitor: ObservableObject {
     private var timer: Timer?
     private var cancellables: Set<AnyCancellable> = []
     private var warned: Set<String> = []
+    private var limitsInFlight = false
+    private var nextLimitsRefresh = Date.distantPast
+    private var liveLimits: (date: Date, payload: [String: Any])?
+    private let limitsQueue = DispatchQueue(label: "dev.notchnull.codex.limits", qos: .utility)
     var onWarning: ((String, UsageWindow) -> Void)?
 
     // Background-queue state.
@@ -58,6 +62,7 @@ final class CodexMonitor: ObservableObject {
     }
 
     private func poll() {
+        refreshAccountLimits()
         queue.async { [weak self] in
             guard let self else { return }
             let events = self.scan()
@@ -66,12 +71,31 @@ final class CodexMonitor: ObservableObject {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     events.forEach(self.apply)
-                    if let limits { self.applyLimits(limits.payload, at: limits.date) }
+                    guard Preferences.shared.codexEnabled else { return }
+                    let current = [limits, self.liveLimits].compactMap { $0 }.max { $0.date < $1.date }
+                    if let current { self.applyLimits(current.payload, at: current.date) }
                     if tally != self.tokens { withAnimation(Motion.state) { self.tokens = tally } }
-                    if limits == nil, self.usage.state == .loading {
+                    if current == nil, self.usage.state == .loading {
                         self.usage.state = .unavailable("No Codex activity yet")
                     }
                 }
+            }
+        }
+    }
+
+    private func refreshAccountLimits() {
+        guard !limitsInFlight, Date() >= nextLimitsRefresh else { return }
+        limitsInFlight = true
+        nextLimitsRefresh = Date().addingTimeInterval(90)
+        limitsQueue.async { [weak self] in
+            let payload = CodexLimitsClient.read()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.limitsInFlight = false
+                guard Preferences.shared.codexEnabled, let payload else { return }
+                let now = Date()
+                self.liveLimits = (now, payload)
+                self.applyLimits(payload, at: now)
             }
         }
     }
@@ -283,7 +307,7 @@ final class CodexMonitor: ObservableObject {
         }
     }
 
-    private func applyLimits(_ payload: [String: Any], at date: Date) {
+    func applyLimits(_ payload: [String: Any], at date: Date, now: Date = Date()) {
         var windows: [UsageWindow] = []
         for key in ["primary", "secondary"] {
             guard let entry = payload[key] as? [String: Any],
@@ -297,15 +321,20 @@ final class CodexMonitor: ObservableObject {
             case 1_440: label = "Day"
             default: label = minutes >= 1_440 ? "\(Int(minutes / 1_440)) days" : "\(Int(minutes / 60)) hours"
             }
-            // A window whose reset already passed has refilled since this log line.
-            let stale = reset.map { $0 < Date() } ?? false
-            windows.append(UsageWindow(id: key, label: label, percent: stale ? 0 : percent, resetsAt: stale ? nil : reset, duration: minutes * 60))
+            // A past reset cannot tell us how much was consumed in the new cycle.
+            guard reset.map({ $0 > now }) ?? true else { continue }
+            windows.append(UsageWindow(id: key, label: label, percent: percent, resetsAt: reset, duration: minutes * 60))
         }
         windows.sort { ($0.duration ?? 0) < ($1.duration ?? 0) }
         let plan = (payload["plan_type"] as? String).map { $0.capitalized }
-        let next = ProviderUsage(provider: .codex, plan: plan, windows: windows, updatedAt: date, state: .ready)
+        let stale = now.timeIntervalSince(date) > 180
+        let state: ProviderUsage.State = windows.isEmpty
+            ? .unavailable("Waiting for current Codex limits")
+            : stale ? .unavailable("Last known limits · awaiting refresh") : .ready
+        let next = ProviderUsage(provider: .codex, plan: plan, windows: windows, updatedAt: date, state: state)
         guard next != usage else { return }
         withAnimation(Motion.state) { usage = next }
+        guard !stale else { return }
         for window in windows where window.severity != .normal {
             if warned.insert(window.warningKey(provider: "Codex")).inserted {
                 onWarning?("Codex", window)
