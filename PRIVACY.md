@@ -6,7 +6,7 @@ NotchNull has no analytics, no telemetry, no accounts and no server. This page l
 
 | Request | When | What is sent |
 |---|---|---|
-| `GET https://api.anthropic.com/api/oauth/usage` | Every 10 minutes while Claude usage is enabled, after you allow the keychain read | Your existing Claude Code access token, read from the macOS keychain item `Claude Code-credentials`. NotchNull never refreshes, copies or stores the token. |
+| `GET https://api.anthropic.com/api/oauth/usage` | Every 10 minutes while Claude usage is enabled, after you allow the keychain read, only without the optional MendCode usage export | Your existing Claude Code access token, read from the macOS keychain item `Claude Code-credentials`. NotchNull never refreshes, copies or stores the token. |
 | `GET https://api.github.com/repos/Obed0101/NotchNull/releases/latest` | Once a day while **Check automatically** is on (Settings › About, on by default), and when you press Check or run `notchnull update` | Nothing beyond the request itself: no token, no identifier, no version. GitHub sees your IP address, as any site does. |
 | `GET https://github.com/Obed0101/NotchNull/releases/download/…/NotchNull.zip` | Only when you press Update or run `notchnull update install` | Nothing beyond the request itself. The download is checked against GitHub's published SHA-256, the app's identifier and version, and its signature before it replaces the app. |
 | `GET https://api.z.ai/api/monitor/usage/quota/limit` (or `open.bigmodel.cn`) | Every 10 minutes, only when a GLM Coding Plan key is found | That key |
@@ -20,6 +20,10 @@ Codex sessions and token totals are read from local files. While Codex monitorin
 opencode sessions are read from a local database. The other plans (Settings › Agents › Other plans, on by default) use keys your tools already saved: the `env` block of `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points at the provider, `~/.local/share/opencode/auth.json`, `~/.config/github-copilot/apps.json` / `hosts.json`, or environment variables such as `Z_AI_API_KEY`, `KIMI_CODE_API_KEY`, `MINIMAX_API_KEY` and `OPENCODE_API_KEY`. Each key is sent only to its own provider, and is never stored, copied or refreshed. With no key for a provider, nothing is sent to it.
 
 ## Files read
+
+Optional MendCode integration: `~/Library/Application Support/NotchNull/mendcode-usage.json` is an explicit, credential-free export of MendCode's own Claude quota readings. When present, NotchNull reads this small local file every 10 seconds instead of querying Anthropic or reading the keychain for usage. Observation timestamps, not file modification times, determine freshness; readings older than 20 minutes are marked as last known and expired windows are omitted. Invalid or empty exports do not trigger a network fallback. If an export disappears after being selected, NotchNull waits for it until restart. The export does not contain plan names, tokens or conversations.
+
+MendCode owns any configured refresh probes; NotchNull does not launch Haiku or configure paid probes automatically. A user who enables MendCode's Claude quota refresh authorizes a minimal Claude Code Haiku turn, which consumes quota. The local export integration must be installed separately; it is not automatically installed with NotchNull.
 
 | Path | Why |
 |---|---|

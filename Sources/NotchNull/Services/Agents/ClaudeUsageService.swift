@@ -18,6 +18,8 @@ final class ClaudeUsageService: ObservableObject {
 
     private var credentials: Credentials?
     private var timer: Timer?
+    private var sharedTimer: Timer?
+    private var sharedSourceSelected = false
     private var inFlight = false
     /// After a 429 the endpoint is left alone until this date, doubling each time it repeats.
     private var retryNotBefore: Date?
@@ -34,6 +36,9 @@ final class ClaudeUsageService: ObservableObject {
                 guard let self else { return }
                 if !enabled {
                     pause()
+                } else if ClaudeSharedUsage.read() != nil || sharedSourceSelected {
+                    sharedSourceSelected = true
+                    resume()
                 } else if !allowed {
                     // The keychain is only read once the user allows it, so macOS never asks unprompted.
                     pause()
@@ -52,6 +57,10 @@ final class ClaudeUsageService: ObservableObject {
 
     private func resume() {
         timer?.invalidate()
+        sharedTimer?.invalidate()
+        sharedTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.refreshSharedUsage() }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: Constants.Agents.claudeUsageInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
@@ -61,9 +70,24 @@ final class ClaudeUsageService: ObservableObject {
     private func pause() {
         timer?.invalidate()
         timer = nil
+        sharedTimer?.invalidate()
+        sharedTimer = nil
+    }
+
+    @discardableResult
+    private func refreshSharedUsage() -> Bool {
+        guard Preferences.shared.claudeUsageEnabled else { return false }
+        if let shared = ClaudeSharedUsage.read() {
+            sharedSourceSelected = true
+            if usage != shared { withAnimation(Motion.state) { usage = shared } }
+        } else if sharedSourceSelected {
+            update(state: .unavailable("Waiting for MendCode usage"))
+        }
+        return sharedSourceSelected
     }
 
     func refresh() {
+        if refreshSharedUsage() { return }
         guard !inFlight else { return }
         if let retryNotBefore, retryNotBefore > Date() { return }
         inFlight = true
@@ -92,6 +116,7 @@ final class ClaudeUsageService: ObservableObject {
         request.setValue("NotchNull/1.0", forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
+            guard Preferences.shared.claudeUsageEnabled, !refreshSharedUsage() else { return }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             switch status {
             case 200:
@@ -113,6 +138,7 @@ final class ClaudeUsageService: ObservableObject {
                 update(state: .unavailable("Usage service returned \(status)"))
             }
         } catch {
+            guard Preferences.shared.claudeUsageEnabled, !refreshSharedUsage() else { return }
             Log.agents.error("Claude usage request failed: \(error.localizedDescription, privacy: .public)")
             update(state: .unavailable("Offline · limits may be out of date"))
         }
