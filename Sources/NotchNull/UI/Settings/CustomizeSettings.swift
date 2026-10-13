@@ -339,17 +339,7 @@ struct LayoutSettings: View {
                 }
             }
         }
-        SettingsGroup(title: "Home rows", footer: "The quick list beside the music player. Fewer rows fit a shorter panel.") {
-            ForEach(Preferences.HomeRow.allCases) { row in
-                SettingsToggle(
-                    title: row.title,
-                    isOn: Binding(
-                        get: { preferences.homeRows.contains(row.rawValue) },
-                        set: { preferences.setHomeRow(row, visible: $0) }
-                    )
-                )
-            }
-        }
+        HomeRowsSettings()
         SettingsGroup(title: "What slides out", footer: "Turn off any live activity you do not want to see beside the notch.") {
             ForEach(ActivityKind.allCases, id: \.self) { kind in
                 SettingsToggle(

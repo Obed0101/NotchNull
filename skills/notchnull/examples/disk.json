@@ -6,6 +6,7 @@
   "size": "small",
   "refresh": 60,
   "command": "df -k / | awk 'NR==2{print $5+0}'",
+  "home": { "text": "{{data}}% used", "progress": "{{data | div 100}}" },
   "view": {
     "type": "column", "spacing": 6, "children": [
       { "type": "value", "value": "{{data}}", "unit": "%", "label": "Used" },

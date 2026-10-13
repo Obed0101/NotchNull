@@ -37,6 +37,7 @@ Saving a file reloads it; a widget whose file did not change keeps its data.
 | `timeout` | 10 | Seconds before the command is stopped (1–120). |
 | `data` | null | Static data, used when there is no command (or before it first runs). |
 | `wing` | none | Show something beside the notch (below). |
+| `home` | none | Show a row in the Home tab's quick list (below). |
 | `order` | 0 | Lower comes first; ties sort by id. |
 | `enabled` | true | `false` hides the widget without deleting the file. |
 | `description` | none | One line about what it does and needs. Shown in Settings › Build › Examples; ignored otherwise. |
@@ -150,9 +151,35 @@ turns false (checked after every command run). Without `when`, the wing is alway
 The most recently changed activity owns the notch; system activities with higher priority
 (an agent that needs the user, volume, brightness) still take over briefly.
 
+## Home rows
+
+A `home` block also puts the widget in the Home tab's quick list, as one row beside the music
+player: its symbol, its title and a short value. Use it for a number the user wants at a glance
+without opening the Widgets tab. The row is added below the built-in ones; the user reorders or
+hides it in Settings › Tabs & Wings, or you place it in `settings.json` → `home.rows` as
+`widget:<id>`.
+
+```json
+"home": {
+  "text": "{{data.passing}}/{{data.total}} passing",
+  "progress": "{{data.ratio}}",
+  "action": { "open": "{{data.url}}" }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `text` | The value at the right of the row. Keep it under about 20 characters. |
+| `title`, `symbol`, `tint` | Default to the widget's. |
+| `progress` | Optional 0–1 bar before the text. |
+| `when` | The row shows only while this is truthy. |
+| `action` | What a click does (see Actions). |
+
 ## Checklist before you finish
 
 - `status.json` shows the widget `ready`, with the `data` you expected.
 - `notchnull render /tmp/w.png --tab widgets` looks right: nothing truncated, no red labels.
 - If it has a wing, render the condition: `notchnull widget <id> data '<json that makes when true>'`
   and look at the notch, or render a matching `--activity`.
+- If it has a `home` block, `notchnull render /tmp/h.png --tab home` shows the row with its text
+  in full.

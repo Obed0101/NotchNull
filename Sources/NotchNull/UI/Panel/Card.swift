@@ -22,6 +22,7 @@ struct InfoRow<Trailing: View>: View {
     let tint: Color
     let title: String
     @ViewBuilder var trailing: Trailing
+    @Environment(\.infoRowHeight) private var height
 
     var body: some View {
         HStack(spacing: 8) {
@@ -38,8 +39,13 @@ struct InfoRow<Trailing: View>: View {
             Spacer(minLength: 6)
             trailing
         }
-        .frame(height: 26)
+        .frame(height: height)
     }
+}
+
+extension EnvironmentValues {
+    /// Height of an `InfoRow`; a list that would otherwise overflow by a few points tightens it.
+    @Entry var infoRowHeight: CGFloat = 26
 }
 
 /// Compact switch that animates its knob; the notch never uses the stock macOS switch.

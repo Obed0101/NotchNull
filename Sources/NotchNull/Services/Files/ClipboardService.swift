@@ -44,6 +44,7 @@ final class ClipboardService: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
 
     func start() {
+        try? FileManager.default.removeItem(at: Self.openScratch)
         items = load()
         Preferences.shared.$clipboardEnabled
             .receive(on: RunLoop.main)
@@ -116,6 +117,51 @@ final class ClipboardService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
             guard self?.lastCopiedID == item.id else { return }
             withAnimation(Motion.state) { self?.lastCopiedID = nil }
+        }
+    }
+
+    /// Opens an item without copying it: files in their app, a link in the browser, an image or
+    /// text as a temporary copy in the app that views it. False when there is nothing to open
+    /// (the files are gone).
+    @discardableResult
+    func open(_ item: ClipItem) -> Bool {
+        let targets = Self.openTargets(for: item, scratch: Self.openScratch)
+        targets.forEach { NSWorkspace.shared.open($0) }
+        return !targets.isEmpty
+    }
+
+    /// Where the temporary copy of an opened image or text lives; emptied before each use and
+    /// when the app starts.
+    static let openScratch = FileManager.default.temporaryDirectory.appendingPathComponent("NotchNull-clipboard", isDirectory: true)
+
+    /// What opening an item shows. An image or text is written into `scratch`, which holds one
+    /// item at a time: history is encrypted on disk, so an earlier copy must not linger there.
+    static func openTargets(for item: ClipItem, scratch: URL) -> [URL] {
+        let fm = FileManager.default
+        try? fm.removeItem(at: scratch)
+        switch item.kind {
+        case .file:
+            return (item.fileURLs ?? []).filter { fm.fileExists(atPath: $0.path) }
+        case .link:
+            if let url = URL(string: item.preview), url.scheme != nil { return [url] }
+            return temporaryCopy(Data((item.text ?? "").utf8), named: "Clipboard.txt", in: scratch)
+        case .image:
+            return item.imagePNG.map { temporaryCopy($0, named: "Clipboard.png", in: scratch) } ?? []
+        case .text, .color:
+            guard let text = item.text, !text.isEmpty else { return [] }
+            return temporaryCopy(Data(text.utf8), named: "Clipboard.txt", in: scratch)
+        }
+    }
+
+    private static func temporaryCopy(_ data: Data, named name: String, in scratch: URL) -> [URL] {
+        let file = scratch.appendingPathComponent(name)
+        do {
+            try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try data.write(to: file, options: .atomic)
+            return [file]
+        } catch {
+            Log.files.error("Clipboard item could not be opened: \(error.localizedDescription)")
+            return []
         }
     }
 

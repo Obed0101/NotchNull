@@ -233,7 +233,17 @@ final class SettingsFile: ObservableObject {
                 return names.first { NotchTab(rawValue: $0) == nil }.map { "unknown tab \($0)" }
             }
         ),
-        strings("home.rows", "Home rows in order: \(Preferences.HomeRow.allCases.map(\.rawValue).joined(separator: ", ")).", \.homeRows, allowed: Preferences.HomeRow.allCases.map(\.rawValue)),
+        SettingField(
+            key: "home.rows", type: "list of names",
+            summary: "Home rows in order: \(Preferences.HomeRow.allCases.map(\.rawValue).joined(separator: ", ")), or \(Preferences.widgetRowPrefix)<id> for a widget with a \"home\" block.",
+            read: { .array($0.homeRows.map { .string($0) }) },
+            write: { prefs, value in
+                guard let names = value.array?.compactMap(\.string) else { return "expected a list of names" }
+                let known: (String) -> Bool = { Preferences.HomeRow(rawValue: $0) != nil || $0.hasPrefix(Preferences.widgetRowPrefix) }
+                prefs.homeRows = names.filter(known)
+                return names.first { !known($0) }.map { "unknown name \($0)" }
+            }
+        ),
         SettingField(
             key: "activities.disabled", type: "list of names", summary: "Activities that never slide out: \(ActivityKind.allCases.map(\.name).joined(separator: ", ")).",
             read: { .array($0.disabledActivities.sorted().map { .string($0) }) },

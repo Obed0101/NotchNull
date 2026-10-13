@@ -67,6 +67,8 @@ command talks to the running app and says so if it is not open.
   See [references/widgets.md](references/widgets.md). Start from a file in [examples/](examples/).
 - **Something beside the notch while a condition holds** (CI failing, deploy running): a widget
   with a `wing` block, which appears while `when` is true and goes away on its own.
+- **One more row in Home, beside the music player** (a count, a status, a percentage): a widget
+  with a `home` block. Built-in rows are switched on in `settings.json` → `home.rows`.
 - **A one-off notification from a script or at the end of a task**:
   `notchnull show "Deploy finished" --subtitle "vercel · production" --symbol checkmark.circle.fill --tint green`.
   Progress: re-run with the same `--id` and a new `--progress 0..1`, then `notchnull hide <id>`.

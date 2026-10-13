@@ -218,6 +218,8 @@ final class NotchWindowController {
         case kVK_RightArrow where searchIsEmpty: picker.move(.right, itemCount: count)
         case kVK_Return, kVK_ANSI_KeypadEnter:
             commitSelection(paste: !event.modifierFlags.contains(.command))
+        case kVK_ANSI_O where event.modifierFlags.contains(.command):
+            openSelection()
         default:
             return false
         }
@@ -236,6 +238,17 @@ final class NotchWindowController {
                 Log.files.info("Clipboard item copied; pasting needs Accessibility")
             }
         }
+    }
+
+    /// ⌘O shows the highlighted item (its file, link, image or text) without copying it. The app
+    /// that opens it takes the keyboard, so the panel only steps aside.
+    private func openSelection() {
+        guard let item = picker.selectedItem(in: clipboard.items) else { return }
+        guard clipboard.open(item) else {
+            NSSound.beep()
+            return
+        }
+        endKeyboardSession(restoreFocus: false)
     }
 
     private func endKeyboardSession(restoreFocus: Bool) {

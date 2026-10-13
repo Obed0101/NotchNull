@@ -468,7 +468,7 @@ private struct FileSettings: View {
             SettingsToggle(title: "Clipboard history", symbol: "list.clipboard.fill", tint: Theme.Accent.clipboard, isOn: $preferences.clipboardEnabled)
             SettingsRow(
                 title: "Open with shortcut",
-                subtitle: "From any app. Type to search, arrows to move, Return to paste, ⌘Return to copy only, Esc to close. Pasting needs Accessibility; without it Return copies.",
+                subtitle: "From any app. Type to search, arrows to move, Return to paste, ⌘Return to copy only, ⌘O to open without copying, Esc to close. Pasting needs Accessibility; without it Return copies.",
                 symbol: "command",
                 tint: Theme.Accent.clipboard
             ) {

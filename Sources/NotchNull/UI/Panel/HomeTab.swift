@@ -25,65 +25,96 @@ struct NowPlayingCard: View {
     @EnvironmentObject private var levels: LevelsService
     @EnvironmentObject private var preferences: Preferences
 
-    /// Taller panels get bigger art and a roomier scrubber.
-    private var roomy: Bool { preferences.panelHeight >= 176 }
+    private static let scrubberHeight: CGFloat = 12
+    private static let transportHeight: CGFloat = 27
+    /// Title, artist and source, one line each.
+    private static let stackedTextHeight: CGFloat = 46
 
     var body: some View {
         Card(padding: 8) {
             if let track = nowPlaying.nowPlaying {
-                playing(track)
+                GeometryReader { proxy in playing(track, in: proxy.size) }
             } else {
                 empty
             }
         }
     }
 
-    private func playing(_ track: NowPlaying) -> some View {
-        let art: CGFloat = roomy ? 72 : 60
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 9) {
-                ArtworkView(image: nowPlaying.artwork, size: art, cornerRadius: roomy ? 10 : 8, tint: nowPlaying.tint)
-                    .onTapGesture { nowPlaying.openPlayer() }
-                    .help("Open \(track.sourceName)")
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(track.title)
-                        .font(Theme.Typeface.bodyStrong)
-                        .foregroundStyle(Theme.Palette.textPrimary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                    Text(track.artist.isEmpty ? track.sourceName : track.artist)
-                        .font(Theme.Typeface.caption)
-                        .foregroundStyle(Theme.Palette.textSecondary)
-                        .lineLimit(1)
-                    HStack(spacing: 0) {
-                        IconButton(symbol: "backward.fill", size: 10, label: "Previous track") { nowPlaying.previous() }
-                        IconButton(symbol: track.isPlaying ? "pause.fill" : "play.fill", size: 13, label: track.isPlaying ? "Pause" : "Play") {
-                            nowPlaying.togglePlayPause()
-                        }
-                        IconButton(symbol: "forward.fill", size: 10, label: "Next track") { nowPlaying.next() }
-                        Spacer(minLength: 2)
-                        AudioBars(isPlaying: track.isPlaying, tint: nowPlaying.tint, barCount: 4, barWidth: 2.2, spacing: 1.8, height: 10)
-                            .padding(.trailing, 2)
-                    }
+    /// Three bands: the track, the scrubber, then transport and volume. The art takes the height
+    /// the other two leave, so the card stays full at any panel size instead of opening gaps.
+    private func playing(_ track: NowPlaying, in size: CGSize) -> some View {
+        let gap: CGFloat = size.height >= 132 ? 10 : 7
+        let free = size.height - Self.scrubberHeight - Self.transportHeight - 2 * gap
+        // A tall card stacks the art over the text, like an album view, instead of floating a
+        // small row in the middle.
+        let stacked = free - Self.stackedTextHeight - gap >= size.width * 0.75
+        // Beside the text the art stays the smaller part, unless there is height to spare.
+        let share: CGFloat = free > size.width * 0.6 ? 0.5 : 0.38
+        let art = stacked
+            ? min(free - Self.stackedTextHeight - gap, size.width)
+            : max(40, min(free, size.width * share))
+        let artwork = ArtworkView(image: nowPlaying.artwork, size: art, cornerRadius: stacked ? 12 : 10, tint: nowPlaying.tint)
+            .onTapGesture { nowPlaying.openPlayer() }
+            .help("Open \(track.sourceName)")
+        return VStack(alignment: .leading, spacing: gap) {
+            if stacked {
+                artwork.frame(maxWidth: .infinity)
+                trackText(track, titleLines: 1)
+                    .frame(height: Self.stackedTextHeight)
+            } else {
+                HStack(alignment: .center, spacing: 10) {
+                    artwork
+                    trackText(track, titleLines: art >= 62 ? 2 : 1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
-            Scrubber(track: track, tint: nowPlaying.tint, compact: !roomy) { nowPlaying.seek(to: $0) }
-            Spacer(minLength: 0)
+            Scrubber(track: track, tint: nowPlaying.tint) { nowPlaying.seek(to: $0) }
+                .frame(height: Self.scrubberHeight)
             HStack(spacing: 8) {
+                HStack(spacing: 0) {
+                    IconButton(symbol: "backward.fill", size: 10, label: "Previous track") { nowPlaying.previous() }
+                    IconButton(symbol: track.isPlaying ? "pause.fill" : "play.fill", size: 13, label: track.isPlaying ? "Pause" : "Play") {
+                        nowPlaying.togglePlayPause()
+                    }
+                    IconButton(symbol: "forward.fill", size: 10, label: "Next track") { nowPlaying.next() }
+                }
+                // The glyphs, not their hover areas, line up with the art's leading edge.
+                .padding(.leading, -6)
                 LevelSlider(value: Double(levels.outputVolume), tint: nowPlaying.tint, label: "Output volume") {
                     levels.setVolume(Float($0))
                 }
-                Text(track.sourceName)
+            }
+            .frame(height: Self.transportHeight)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private func trackText(_ track: NowPlaying, titleLines: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(track.title)
+                .font(Theme.Typeface.title)
+                .foregroundStyle(Theme.Palette.textPrimary)
+                .lineLimit(titleLines)
+                .contentTransition(.opacity)
+            if !track.artist.isEmpty {
+                Text(track.artist)
+                    .font(Theme.Typeface.caption)
+                    .foregroundStyle(Theme.Palette.textSecondary)
                     .lineLimit(1)
+            }
+            HStack(spacing: 5) {
+                if track.isPlaying {
+                    AudioBars(isPlaying: true, tint: nowPlaying.tint, barCount: 4, barWidth: 2, spacing: 1.6, height: 9)
+                        .transition(.opacity)
+                }
+                Text(track.sourceName)
                     .font(Theme.Typeface.caption)
                     .foregroundStyle(Theme.Palette.textTertiary)
-                    .padding(.horizontal, 7)
-                    .frame(height: 18)
-                    .background(Capsule().fill(Theme.Palette.surfaceHover))
+                    .lineLimit(1)
             }
+            .animation(Motion.feedback, value: track.isPlaying)
         }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var empty: some View {
@@ -114,7 +145,6 @@ struct NowPlayingCard: View {
 struct Scrubber: View {
     let track: NowPlaying
     let tint: Color
-    var compact = false
     let onSeek: (Double) -> Void
     @State private var hovering = false
     @State private var dragFraction: Double?
@@ -141,7 +171,8 @@ struct Scrubber: View {
                 Text(Formatting.clock(dragFraction.map { $0 * track.duration } ?? elapsed))
                     .font(Theme.Typeface.caption.monospacedDigit())
                     .foregroundStyle(Theme.Palette.textTertiary)
-                    .frame(width: compact ? 28 : 34, alignment: .leading)
+                    // Sized by the text: an hour-long track never wraps into a second line.
+                    .fixedSize()
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Theme.Palette.track)
@@ -164,7 +195,7 @@ struct Scrubber: View {
                 Text("-" + Formatting.clock(max(0, track.duration - elapsed)))
                     .font(Theme.Typeface.caption.monospacedDigit())
                     .foregroundStyle(Theme.Palette.textTertiary)
-                    .frame(width: compact ? 32 : 38, alignment: .trailing)
+                    .fixedSize()
             }
             .animation(Motion.feedback, value: hovering)
         }
@@ -200,22 +231,36 @@ private struct LiveBadge: View {
     }
 }
 
-/// The quick list: rows chosen in Settings → Tabs & Wings, in their order.
+/// The quick list: rows chosen in Settings → Tabs & Wings, in their order. Built-in rows and
+/// widgets that declare a `home` block share it.
 struct QuickRowsCard: View {
     @EnvironmentObject private var preferences: Preferences
     @EnvironmentObject private var stats: SystemStatsService
+    @EnvironmentObject private var battery: BatteryService
+    @EnvironmentObject private var widgets: WidgetStore
 
     var body: some View {
-        Card(padding: 7) {
-            NotchScroll {
-                // Rows share any extra height evenly, so a taller panel spaces them out instead of
-                // leaving a gap at the bottom.
-                VStack(spacing: 1) {
-                    ForEach(Array(rows.enumerated()), id: \.element) { index, row in
-                        view(for: row)
-                            .frame(maxHeight: .infinity)
-                            .condense(delay: Motion.stagger(index + 2))
+        Card(padding: 6) {
+            let keys = keys
+            if keys.isEmpty {
+                Text("Choose rows in Settings › Tabs & Wings")
+                    .font(Theme.Typeface.caption)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                GeometryReader { proxy in
+                    NotchScroll {
+                        // Rows share any extra height evenly, so a taller panel spaces them out
+                        // instead of leaving a gap at the bottom.
+                        VStack(spacing: 0) {
+                            ForEach(Array(keys.enumerated()), id: \.element) { index, key in
+                                view(for: key)
+                                    .frame(maxHeight: .infinity)
+                                    .condense(delay: Motion.stagger(index + 2))
+                            }
+                        }
                     }
+                    .environment(\.infoRowHeight, Self.rowHeight(count: keys.count, available: proxy.size.height))
                 }
             }
         }
@@ -223,24 +268,45 @@ struct QuickRowsCard: View {
         .onDisappear { stats.setActive(false) }
     }
 
-    private var rows: [Preferences.HomeRow] {
-        preferences.visibleHomeRows.filter { row in
-            switch row {
+    /// Full-height rows while they fit; a list a few points too tall tightens before it scrolls.
+    static func rowHeight(count: Int, available: CGFloat) -> CGFloat {
+        CGFloat(count) * 26 <= available ? 26 : 24
+    }
+
+    private var homeWidgets: [LoadedWidget] { widgets.widgets.filter { $0.homeRow != nil } }
+
+    private var keys: [String] {
+        let shown = Set(homeWidgets.filter(\.showsHomeRow).map { Preferences.widgetRowPrefix + $0.id })
+        return preferences.homeKeys(widgetRows: homeWidgets.map(\.id)).filter { key in
+            guard let row = Preferences.HomeRow(rawValue: key) else { return shown.contains(key) }
+            return switch row {
             case .upNext: preferences.calendarEnabled
-            case .system, .network: preferences.statsEnabled
-            default: true
+            case .system, .network, .storage: preferences.statsEnabled
+            case .agents: preferences.agentsEnabled
+            case .battery: preferences.batteryEnabled && (battery.state.hasBattery || Motion.isSnapshot)
+            case .clipboard: preferences.clipboardEnabled
+            case .keepAwake, .timer, .toggles: true
             }
         }
     }
 
     @ViewBuilder
-    private func view(for row: Preferences.HomeRow) -> some View {
-        switch row {
+    private func view(for key: String) -> some View {
+        switch Preferences.HomeRow(rawValue: key) {
         case .keepAwake: KeepAwakeRow()
         case .upNext: UpNextRow()
         case .timer: TimerRow()
         case .system: SystemRow()
+        case .agents: AgentLimitsRow()
         case .network: NetworkRow()
+        case .battery: BatteryRow()
+        case .storage: StorageRow()
+        case .toggles: TogglesRow()
+        case .clipboard: ClipboardRow()
+        case nil:
+            if let widget = homeWidgets.first(where: { Preferences.widgetRowPrefix + $0.id == key }) {
+                WidgetHomeRow(widget: widget)
+            }
         }
     }
 }

@@ -132,7 +132,7 @@ Scripts can use the same surface: every CLI command is a call to a local API on 
 
 **Panel**
 - Home, Recent (what the notch told you about lately: finished agent runs, downloads, screenshots, timers, meetings; tap one to open it), Agents, Controls (Wi-Fi, Bluetooth, dark mode, keep awake, lock, sleep, sound output, brightness), Widgets, Downloads, Tray, Clipboard history (encrypted, real file previews).
-- **⌃⌘V** opens Clipboard from any app, Raycast style: type to search, arrows to pick, Return pastes (⌘Return only copies). Change or turn off the shortcut in Settings.
+- **⌃⌘V** opens Clipboard from any app, Raycast style: type to search, arrows to pick, Return pastes (⌘Return only copies), ⌘O opens the item to look at it first. Change or turn off the shortcut in Settings.
 - Drag a file toward the notch to park it, copy it or AirDrop it.
 
 **Yours to shape**

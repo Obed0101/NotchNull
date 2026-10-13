@@ -49,6 +49,7 @@ enum SnapshotRenderer {
         preferences.panelWidth = 680
         preferences.panelHeight = 200
         render(large, geometry: geometry, services: services, to: directory)
+        renderHomeFits(geometry: geometry, services: services, to: directory)
         (preferences.panelWidth, preferences.panelHeight) = (saved.0, saved.1)
         preferences.closedExtraWidth = 90
         render(wideClosed, geometry: geometry, services: services, to: directory)
@@ -200,6 +201,32 @@ enum SnapshotRenderer {
         }
     }
 
+    /// Home where it is tightest: the factory size with the default rows and an hour-long paused
+    /// video, a slightly taller panel, and every row there is (a widget's row included).
+    private static func renderHomeFits(geometry: NotchGeometry, services: AppServices, to directory: URL) {
+        let preferences = Preferences.shared
+        let saved = (preferences.homeRows, preferences.hiddenHomeWidgets)
+        let player = (services.nowPlaying.nowPlaying, services.nowPlaying.artwork, services.nowPlaying.tint)
+        services.nowPlaying.preview(
+            NowPlaying(title: "Meta just caught up to OpenAI and nobody noticed", artist: "Theo - t3.gg", album: "", duration: 2281, position: 207, sampledAt: Date(), isPlaying: false, trackID: "long", bundleID: "com.brave.Browser", sourceName: "Brave Browser"),
+            artwork: player.1, tint: player.2
+        )
+        preferences.homeRows = Preferences.defaultHomeRows.map(\.rawValue)
+        preferences.panelWidth = Preferences.factoryDefaults[Preferences.Keys.panelWidth] as? Double ?? 500
+        preferences.panelHeight = Preferences.factoryDefaults[Preferences.Keys.panelHeight] as? Double ?? 148
+        render([("43-home-factory", .open, .home)], geometry: geometry, services: services, to: directory)
+        preferences.panelHeight = 172
+        render([("44-home-taller", .open, .home)], geometry: geometry, services: services, to: directory)
+        seedWidgets(now: Date(), homeRow: true)
+        preferences.homeRows = Preferences.HomeRow.allCases.map(\.rawValue)
+        preferences.hiddenHomeWidgets = []
+        preferences.panelHeight = 330
+        render([("45-home-every-row", .open, .home)], geometry: geometry, services: services, to: directory)
+        seedWidgets(now: Date())
+        (preferences.homeRows, preferences.hiddenHomeWidgets) = saved
+        services.nowPlaying.preview(player.0, artwork: player.1, tint: player.2)
+    }
+
     private static func seed(_ services: AppServices) {
         let now = Date()
         services.nowPlaying.preview(
@@ -348,10 +375,12 @@ enum SnapshotRenderer {
     }
 
     /// Three widget files as an agent would write them, with their command output already in.
-    private static func seedWidgets(now: Date) {
+    /// `homeRow` gives the CI widget a `home` block, so it also shows as a row in Home.
+    private static func seedWidgets(now: Date, homeRow: Bool = false) {
+        let home = homeRow ? #""home": {"text": "{{data.passing}}/{{data.total}} passing", "progress": "{{data.ratio}}"},"# : ""
         let files: [(id: String, json: String, data: String)] = [
             ("ci", """
-            {"title": "CI", "symbol": "checkmark.seal.fill", "tint": "green", "size": "medium",
+            {"title": "CI", "symbol": "checkmark.seal.fill", "tint": "green", "size": "medium", \(home)
              "view": {"type": "column", "spacing": 6, "children": [
                {"type": "row", "children": [
                  {"type": "value", "value": "{{data.passing}}", "unit": "/{{data.total}}", "label": "checks passing", "style": "small"},

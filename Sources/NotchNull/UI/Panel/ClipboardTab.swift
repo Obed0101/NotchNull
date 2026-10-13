@@ -103,6 +103,11 @@ private struct ClipTile: View {
                             .transition(.scale(scale: 0.25).combined(with: .opacity))
                     } else if hovering || item.pinned {
                         HStack(spacing: 0) {
+                            if hovering {
+                                IconButton(symbol: "arrow.up.forward.square", size: 9, tint: Theme.Palette.textSecondary, label: "Open (⌘O)") {
+                                    if !clipboard.open(item) { NSSound.beep() }
+                                }
+                            }
                             IconButton(symbol: item.pinned ? "pin.fill" : "pin", size: 9, tint: item.pinned ? Theme.Accent.warning : Theme.Palette.textSecondary, label: item.pinned ? "Unpin" : "Pin") {
                                 clipboard.togglePin(item)
                             }

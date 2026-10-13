@@ -19,6 +19,8 @@ struct WidgetDefinition: Equatable {
     let view: JSONValue
     /// Optional wing: `{ "when": "{{data.failing}}", "leading": node, "trailing": node }`.
     let wing: JSONValue?
+    /// Optional Home row: `{ "text": "{{data | count}} open", "progress": "{{data.ratio}}", "action": {…} }`.
+    let home: JSONValue?
     let staticData: JSONValue
     let order: Int
 
@@ -36,6 +38,7 @@ struct WidgetDefinition: Equatable {
         timeout = min(max(object["timeout"]?.double ?? 10, 1), 120)
         self.view = view
         wing = object["wing"]
+        home = object["home"]
         staticData = object["data"] ?? .null
         order = Int(object["order"]?.double ?? 0)
         if object["enabled"]?.bool == false { throw WidgetError.disabled }
@@ -68,6 +71,17 @@ struct LoadedWidget: Identifiable, Equatable {
     var error: String? {
         if case .failed(let message) = state { return message }
         return nil
+    }
+
+    /// The widget's `home` block, when it asks for a row in the Home list.
+    var homeRow: [String: JSONValue]? { definition?.home?.object }
+
+    var scope: JSONValue { .object(["data": data]) }
+
+    /// False while the row's own `when` is falsy.
+    var showsHomeRow: Bool {
+        guard let homeRow else { return false }
+        return homeRow["when"].map { Template.resolve($0, in: scope)?.isTruthy ?? false } ?? true
     }
 }
 

@@ -41,7 +41,7 @@ final class Preferences: ObservableObject {
 
     /// Rows available in the Home tab's quick list.
     enum HomeRow: String, CaseIterable, Identifiable {
-        case keepAwake, upNext, timer, system, network
+        case keepAwake, upNext, timer, system, agents, network, battery, storage, toggles, clipboard
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -49,7 +49,26 @@ final class Preferences: ObservableObject {
             case .upNext: "Up next"
             case .timer: "Timer"
             case .system: "CPU and memory"
+            case .agents: "Agent limits"
             case .network: "Network"
+            case .battery: "Battery"
+            case .storage: "Storage"
+            case .toggles: "Wi-Fi, Bluetooth and Dark Mode"
+            case .clipboard: "Last copied"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .keepAwake: "cup.and.saucer.fill"
+            case .upNext: "video.fill"
+            case .timer: "timer"
+            case .system: "cpu"
+            case .agents: "sparkles"
+            case .network: "arrow.up.arrow.down"
+            case .battery: "battery.75percent"
+            case .storage: "internaldrive.fill"
+            case .toggles: "switch.2"
+            case .clipboard: "doc.on.clipboard.fill"
             }
         }
     }
@@ -242,6 +261,8 @@ final class Preferences: ObservableObject {
     @Published var disabledActivities: Set<String> { didSet { defaults.set(Array(disabledActivities), forKey: Keys.disabledActivities) } }
     /// Home rows in display order; rows not listed are hidden.
     @Published var homeRows: [String] { didSet { defaults.set(homeRows, forKey: Keys.homeRows) } }
+    /// Widget rows (as `widget:<id>`) the user switched off in Home.
+    @Published var hiddenHomeWidgets: Set<String> { didSet { defaults.set(Array(hiddenHomeWidgets), forKey: Keys.hiddenHomeWidgets) } }
 
     enum Keys {
         static let displayMode = "displayMode", openTrigger = "openTrigger"
@@ -251,7 +272,7 @@ final class Preferences: ObservableObject {
         static let animationSpeed = "animationSpeed", bounce = "bounce", hoverDelay = "hoverDelay", closeDelay = "closeDelay"
         static let staggerContent = "staggerContent"
         static let emissionIntensity = "emissionIntensity", glowNeedsYou = "glowNeedsYou", hideNotch = "hideNotch"
-        static let paceWarnings = "paceWarnings", homeRows = "homeRows", usageShowsRemaining = "usageShowsRemaining"
+        static let paceWarnings = "paceWarnings", homeRows = "homeRows", hiddenHomeWidgets = "hiddenHomeWidgets", usageShowsRemaining = "usageShowsRemaining"
         static let tabSwipe = "tabSwipe"
         static let hideOnFullscreen = "hideOnFullscreen", checkForUpdates = "checkForUpdates"
         static let sounds = "sounds", tabOrder = "tabOrder", hiddenTabs = "hiddenTabs", disabledActivities = "disabledActivities"
@@ -266,7 +287,9 @@ final class Preferences: ObservableObject {
         static let islandSatellites = "islandSatellites", islandWidth = "islandWidth", islandHeight = "islandHeight", islandTop = "islandTop"
     }
 
-    static let defaultHomeRows: [HomeRow] = [.keepAwake, .upNext, .timer, .system]
+    static let defaultHomeRows: [HomeRow] = [.keepAwake, .upNext, .timer, .system, .agents]
+    /// A widget with a `home` block is listed in `homeRows` as this prefix plus its id.
+    static let widgetRowPrefix = "widget:"
 
     static let factoryDefaults: [String: Any] = [
         Keys.emissionIntensity: 0.7, Keys.glowNeedsYou: true, Keys.hideNotch: false, Keys.paceWarnings: true,
@@ -389,6 +412,7 @@ final class Preferences: ObservableObject {
         hiddenTabs = hidden
         disabledActivities = Set(defaults.stringArray(forKey: Keys.disabledActivities) ?? [])
         homeRows = defaults.stringArray(forKey: Keys.homeRows) ?? Self.defaultHomeRows.map(\.rawValue)
+        hiddenHomeWidgets = Set(defaults.stringArray(forKey: Keys.hiddenHomeWidgets) ?? [])
         observeSystemAccent()
     }
 
@@ -446,17 +470,39 @@ final class Preferences: ObservableObject {
     /// Every tab shows by default; the Widgets tab still waits for its first widget.
     static let defaultHiddenTabs: [String] = []
 
-    var visibleHomeRows: [HomeRow] { homeRows.compactMap(HomeRow.init(rawValue:)) }
-
-    func setHomeRow(_ row: HomeRow, visible: Bool) {
-        withAnimation(Motion.state) {
-            if visible, !homeRows.contains(row.rawValue) {
-                // Keep the canonical order when a row comes back.
-                homeRows = HomeRow.allCases.map(\.rawValue).filter { homeRows.contains($0) || $0 == row.rawValue }
-            } else if !visible {
-                homeRows.removeAll { $0 == row.rawValue }
-            }
+    /// Keys of the Home rows that show, in order: the listed ones, then widget rows not placed yet.
+    /// `widgetRows` are the ids of the widgets that currently declare a `home` block.
+    func homeKeys(widgetRows: [String]) -> [String] {
+        let available = widgetRows.map { Self.widgetRowPrefix + $0 }
+        var keys: [String] = []
+        for key in homeRows where HomeRow(rawValue: key) != nil || available.contains(key) {
+            if !keys.contains(key) { keys.append(key) }
         }
+        return keys + available.filter { !keys.contains($0) && !hiddenHomeWidgets.contains($0) }
+    }
+
+    func setHomeKey(_ key: String, visible: Bool, widgetRows: [String]) {
+        var keys = homeKeys(widgetRows: widgetRows)
+        withAnimation(Motion.state) {
+            if visible {
+                hiddenHomeWidgets.remove(key)
+                if !keys.contains(key) { keys.append(key) }
+            } else {
+                keys.removeAll { $0 == key }
+                if key.hasPrefix(Self.widgetRowPrefix) { hiddenHomeWidgets.insert(key) }
+            }
+            homeRows = keys
+        }
+    }
+
+    func moveHomeKey(_ key: String, by offset: Int, widgetRows: [String]) {
+        var keys = homeKeys(widgetRows: widgetRows)
+        guard let index = keys.firstIndex(of: key) else { return }
+        let target = max(0, min(keys.count - 1, index + offset))
+        guard target != index else { return }
+        keys.remove(at: index)
+        keys.insert(key, at: target)
+        withAnimation(Motion.state) { homeRows = keys }
     }
 
     func isFeatureEnabled(_ tab: NotchTab) -> Bool {
@@ -495,7 +541,7 @@ final class Preferences: ObservableObject {
             Keys.bodyStyle, Keys.tintHex, Keys.accentHex, Keys.accentFollowsSystem, Keys.bodyOpacity, Keys.panelWidth, Keys.panelHeight,
             Keys.closedExtraWidth, Keys.activityWidthScale, Keys.cornerScale, Keys.shadow, Keys.animationSpeed,
             Keys.bounce, Keys.hoverDelay, Keys.closeDelay, Keys.staggerContent, Keys.emissionIntensity,
-            Keys.tabOrder, Keys.hiddenTabs, Keys.disabledActivities, Keys.homeRows,
+            Keys.tabOrder, Keys.hiddenTabs, Keys.disabledActivities, Keys.homeRows, Keys.hiddenHomeWidgets,
             Keys.shapeStyle, Keys.pillContent, Keys.islandSatellites, Keys.islandWidth, Keys.islandHeight, Keys.islandTop,
         ]
         keys.forEach(defaults.removeObject(forKey:))
@@ -521,6 +567,7 @@ final class Preferences: ObservableObject {
             hiddenTabs = Set(Self.defaultHiddenTabs)
             disabledActivities = []
             homeRows = Self.defaultHomeRows.map(\.rawValue)
+            hiddenHomeWidgets = []
             shapeStyle = .auto
             pillContent = .clock
             islandSatellites = defaults.bool(forKey: Keys.islandSatellites)

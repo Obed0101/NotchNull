@@ -50,6 +50,8 @@ Everything lives in `~/Library/Application Support/NotchNull/`:
 | `download-cleanup.json` | Downloads waiting for their deadline: file name, size, source site, a bookmark to follow renames, and when it expires |
 | `~/.config/opencode/plugins/notchnull.js` | Only after you enable the opencode plugin in Settings → Agents |
 
+Opening a clipboard image or text (the open button on its tile, or ⌘O) writes one unencrypted copy to `NotchNull-clipboard/` in your user's temporary folder so another app can show it. It holds one item at a time and is deleted on the next open and when NotchNull starts. Files and links open in place; nothing is written for them.
+
 And `~/.notchnull/`, the folder you (or your agent) edit to change the notch:
 
 | File | Contents |
