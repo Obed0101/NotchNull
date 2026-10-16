@@ -11,9 +11,15 @@ struct OpenCodeGoPlan: PlanProvider {
     var tint: Color { Theme.Accent.opencode }
 
     func credential(in sources: PlanCredentialSources) -> PlanCredential? {
+        // An explicit environment key is an override and names its own source.
         if let found = sources.env(["OPENCODE_API_KEY"]) {
             return PlanCredential(key: found.value, source: found.name)
         }
+        // The account OpenCode is signed in with, when the user allowed reading it.
+        if case .account(let token, let label) = sources.openCodeAccount {
+            return PlanCredential(key: token, source: label.isEmpty ? "OpenCode · active account" : "OpenCode · \(label)")
+        }
+        // Legacy fallback: the old auth.json key under either provider id.
         if let found = sources.openCodeKey(["opencode-go", "opencode"]) {
             return PlanCredential(key: found.key, source: "OpenCode")
         }

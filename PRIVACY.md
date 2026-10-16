@@ -12,12 +12,14 @@ NotchNull has no analytics, no telemetry, no accounts and no server. This page l
 | `GET https://api.z.ai/api/monitor/usage/quota/limit` (or `open.bigmodel.cn`) | Every 10 minutes, only when a GLM Coding Plan key is found | That key |
 | `GET https://api.kimi.com/coding/v1/usages` | Every 10 minutes, only when a Kimi Code key is found | That key |
 | `GET https://api.minimax.io/v1/api/openplatform/coding_plan/remains` (or `api.minimaxi.com`) | Every 10 minutes, only when a MiniMax key is found | That key |
-| `GET https://opencode.ai/zen/go/v1/usage` | Every 10 minutes, only when an OpenCode key is found | That key |
+| `GET https://opencode.ai/zen/go/v1/usage` | Every 10 minutes, when a legacy OpenCode key is found, or — only after you allow it — the active OpenCode account is read with `opencode auth export` | That key |
 | `GET https://api.github.com/copilot_internal/user` | Every 10 minutes, only when a Copilot sign-in is found | That GitHub token |
 
 Codex sessions and token totals are read from local files. While Codex monitoring is enabled, NotchNull also launches the installed `codex app-server --stdio` every 10 minutes and requests `account/rateLimits/read` for current account limits. Codex handles the network request and its own authentication using its existing configuration; NotchNull does not read or store Codex credentials or start model turns. If Codex is unavailable, local log limits remain a fallback and old readings are marked as last known rather than current.
 
 opencode sessions are read from a local database. The other plans (Settings › Agents › Other plans, on by default) use keys your tools already saved: the `env` block of `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points at the provider, `~/.local/share/opencode/auth.json`, `~/.config/github-copilot/apps.json` / `hosts.json`, or environment variables such as `Z_AI_API_KEY`, `KIMI_CODE_API_KEY`, `MINIMAX_API_KEY` and `OPENCODE_API_KEY`. Each key is sent only to its own provider, and is never stored, copied or refreshed. With no key for a provider, nothing is sent to it.
+
+OpenCode Go can also use the account OpenCode itself is signed in with, but only after you turn on **Read the active OpenCode account** (Settings › Agents › Other plans, off by default). NotchNull then runs the installed `opencode` CLI as `opencode auth export`, whose JSON output includes stored credentials; NotchNull keeps only the single active OpenCode account's key in memory, ignores refresh tokens and metadata, and never writes, logs, copies or refreshes it. If no account is active, more than one is, or the CLI is missing, nothing is sent to OpenCode and Settings shows how to sign in or choose an account through OpenCode's own `/connect` or `opencode auth` commands. Turn the setting off to stop the read entirely.
 
 ## Files read
 
@@ -30,6 +32,7 @@ MendCode owns any configured refresh probes; NotchNull does not launch Haiku or 
 | `~/.claude/projects/*/*.jsonl` | Live Claude Code sessions, the last message of a turn, tokens used today |
 | `~/.codex/sessions/**/*.jsonl` | Codex sessions and rate limits |
 | `~/.local/share/opencode/opencode.db` | opencode sessions and token totals (read-only; v2 `session_v2`/`session_message` tables, pre-2.0 `session` history ignored) |
+| The installed `opencode` CLI, run as `opencode auth export` | Only when you allow reading the active OpenCode account in Settings › Agents. Its output includes secrets; NotchNull keeps the active account's key in memory and discards the rest. It never runs `auth login`, `switch` or `logout` |
 | `~/.claude/settings.json` | Only when you click **Enable** for approval alerts |
 | `~/Downloads` | Download progress, AirDrop arrivals and cleanup deadlines (file names, sizes, the quarantine record and the site a file came from) |
 | `~/.notchnull/` | Your settings file and widgets, watched while the app runs |

@@ -139,6 +139,8 @@ final class AgentHub: ObservableObject {
         var usage = opencode.usage
         guard let go = plans.openCodeGo, !go.windows.isEmpty else { return usage }
         usage.windows = go.windows
+        // The bars come from the Go account, so they carry its fetch time, not the local DB's.
+        usage.updatedAt = go.updatedAt ?? usage.updatedAt
         if usage.state != .ready { usage.state = go.state }
         return usage
     }

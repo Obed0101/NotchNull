@@ -8,6 +8,9 @@ import SwiftUI
 final class PlanUsageService: ObservableObject {
     /// Subscriptions with a key, in registry order; those without a plan are left out.
     @Published private(set) var usages: [PlanUsage] = []
+    /// Why the active OpenCode Console account could (not) be used, for Settings. Nil when the
+    /// export path is off (legacy behavior) or before the first refresh.
+    @Published private(set) var openCodeAccount: OpenCodeAuthExport.Selection?
 
     private var timer: Timer?
     private var inFlight = false
@@ -20,13 +23,25 @@ final class PlanUsageService: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] enabled in enabled ? self?.resume() : self?.pause() }
             .store(in: &cancellables)
+        // Turning the OpenCode account consent on resolves it now instead of at the next tick.
+        Preferences.shared.$opencodeAccountUsageAllowed
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard Preferences.shared.planUsageEnabled else { return }
+                self?.refresh()
+            }
+            .store(in: &cancellables)
     }
 
     /// OpenCode Go's limits, which the opencode agent block shows when opencode is watched.
     var openCodeGo: PlanUsage? { usages.first { $0.id == OpenCodeGoPlan.planID } }
 
     /// Fixture entry point for snapshot rendering.
-    func preview(_ usages: [PlanUsage]) { self.usages = usages }
+    func preview(_ usages: [PlanUsage], openCodeAccount: OpenCodeAuthExport.Selection? = nil) {
+        self.usages = usages
+        self.openCodeAccount = openCodeAccount
+    }
 
     private func resume() {
         timer?.invalidate()
@@ -39,18 +54,26 @@ final class PlanUsageService: ObservableObject {
     private func pause() {
         timer?.invalidate()
         timer = nil
-        withAnimation(Motion.state) { usages = [] }
+        withAnimation(Motion.state) {
+            usages = []
+            openCodeAccount = nil
+        }
     }
 
     func refresh() {
         guard !inFlight else { return }
         inFlight = true
+        // Reading the active account is a separate consent on top of plan usage; without it the
+        // export is never run and only the legacy environment/auth.json keys are used.
+        let accountUsageAllowed = Preferences.shared.opencodeAccountUsageAllowed
         Task {
             defer { inFlight = false }
-            let found = await Task.detached(priority: .utility) { () -> [(any PlanProvider, PlanCredential)] in
-                let sources = PlanCredentialSources.load()
-                return PlanProviders.all.compactMap { provider in provider.credential(in: sources).map { (provider, $0) } }
+            let (found, account) = await Task.detached(priority: .utility) { () -> ([(any PlanProvider, PlanCredential)], OpenCodeAuthExport.Selection?) in
+                let sources = PlanCredentialSources.load(accountUsageAllowed: accountUsageAllowed)
+                let credentials = PlanProviders.all.compactMap { provider in provider.credential(in: sources).map { (provider, $0) } }
+                return (credentials, sources.openCodeAccount)
             }.value
+            if openCodeAccount != account { openCodeAccount = account }
             let results = await withTaskGroup(of: (Int, Result<PlanSnapshot, PlanError>).self) { group in
                 for (index, (provider, credential)) in found.enumerated() {
                     group.addTask {

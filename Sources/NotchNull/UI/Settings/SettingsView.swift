@@ -336,7 +336,7 @@ private struct ActivitiesSettings: View {
     }
 }
 
-private struct AgentSettings: View {
+struct AgentSettings: View {
     @EnvironmentObject private var preferences: Preferences
     @EnvironmentObject private var agents: AgentHub
     @EnvironmentObject private var claudeUsage: ClaudeUsageService
@@ -347,6 +347,22 @@ private struct AgentSettings: View {
         case .loading: "Key from \(usage.source) · checking"
         case .ready: "Key from \(usage.source)" + (usage.plan.map { " · \($0)" } ?? "")
         case .signedOut(let message), .unavailable(let message): "Key from \(usage.source) · \(message)"
+        }
+    }
+
+    /// The OpenCode account read state, shown beside its consent toggle. Names a status, never a secret.
+    private var openCodeAccountStatus: (title: String, subtitle: String, symbol: String, tint: Color) {
+        switch plans.openCodeAccount {
+        case .account(_, let label):
+            ("OpenCode account connected", "Using \(label) for OpenCode Go limits.", "checkmark.seal.fill", Theme.Accent.success)
+        case .ambiguous:
+            ("Choose one OpenCode account", "More than one account is active. Run `opencode auth switch` to pick one, then reopen this pane.", "exclamationmark.triangle.fill", Theme.Accent.warning)
+        case .noAccount:
+            ("No OpenCode Go account", "Run `opencode auth login` and choose OpenCode, then reopen this pane.", "questionmark.circle", Theme.Palette.textTertiary)
+        case .cliMissing:
+            ("opencode CLI not found", "Install OpenCode and run `opencode auth login`, then reopen this pane.", "questionmark.circle", Theme.Palette.textTertiary)
+        case nil:
+            ("Checking the OpenCode account…", "The active account is read on the next usage check.", "clock", Theme.Palette.textTertiary)
         }
     }
 
@@ -400,9 +416,27 @@ private struct AgentSettings: View {
                 SettingsRow(title: error, symbol: "exclamationmark.triangle.fill", tint: Theme.Accent.danger) { EmptyView() }
             }
         }
-        SettingsGroup(title: "Other plans", footer: "GLM Coding Plan, Kimi Code, MiniMax, OpenCode Go and GitHub Copilot. Keys are found where your tools keep them: OpenCode's auth.json, the env block of ~/.claude/settings.json, the Copilot editor sign-in, or variables such as Z_AI_API_KEY. Each key goes only to its own provider's usage endpoint and is never stored or refreshed.") {
+        SettingsGroup(title: "Other plans", footer: "GLM Coding Plan, Kimi Code, MiniMax, OpenCode Go and GitHub Copilot. Keys are found where your tools keep them: OpenCode's auth.json, the env block of ~/.claude/settings.json, the Copilot editor sign-in, or variables such as Z_AI_API_KEY. OpenCode Go can also use the account OpenCode is signed in with, when you allow it below. Each key goes only to its own provider's usage endpoint and is never stored or refreshed.") {
             SettingsToggle(title: "Show limits of other coding plans", symbol: "square.stack.3d.up.fill", tint: Theme.Accent.glm, isOn: $preferences.planUsageEnabled)
             if preferences.planUsageEnabled {
+                SettingsToggle(
+                    title: "Read the active OpenCode account",
+                    subtitle: "Adds OpenCode Go limits using the account OpenCode is signed in with. NotchNull runs `opencode auth export`, whose output includes the account secret (kept in memory and sent only to opencode.ai). Off by default.",
+                    symbol: "person.badge.key.fill",
+                    tint: Theme.Accent.opencode,
+                    isOn: $preferences.opencodeAccountUsageAllowed
+                )
+                if preferences.opencodeAccountUsageAllowed {
+                    let account = openCodeAccountStatus
+                    SettingsRow(title: account.title, subtitle: account.subtitle, symbol: account.symbol, tint: account.tint) { EmptyView() }
+                }
+                SettingsToggle(
+                    title: "Show what is left",
+                    subtitle: "For these plans only. Off reads like each provider's dashboard (% used).",
+                    symbol: "battery.75percent",
+                    tint: Theme.Accent.glm,
+                    isOn: $preferences.planUsageShowsRemaining
+                )
                 if plans.usages.isEmpty {
                     SettingsRow(title: "No other plan found", subtitle: "Plans appear here once one of their keys is on this Mac.", symbol: "magnifyingglass", tint: Theme.Palette.textTertiary) { EmptyView() }
                 }

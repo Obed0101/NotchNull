@@ -130,13 +130,30 @@ private struct ProviderUsageBlock: View {
 
     @ViewBuilder
     private func windows(_ usage: ProviderUsage) -> some View {
+        // An opencode block with windows is showing OpenCode Go's server limits, not local tokens.
+        let isGo = provider == .opencode && !usage.windows.isEmpty
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(usage.windows) { window in
-                    UsageWindowRow(window: window, tint: provider.tint, now: context.date, breakdown: window.label == "Week" ? usage.breakdown : [])
+                    UsageWindowRow(
+                        window: window,
+                        tint: provider.tint,
+                        now: context.date,
+                        breakdown: window.label == "Week" ? usage.breakdown : [],
+                        showsRemaining: isGo ? preferences.planUsageShowsRemaining : nil
+                    )
                 }
             }
-            .help(provider == .codex ? "From Codex logs, updated \(usage.updatedAt.map { Formatting.relative($0, now: context.date) } ?? "—")" : provider == .opencode ? "From the local opencode database, updated \(usage.updatedAt.map { Formatting.relative($0, now: context.date) } ?? "—")" : "")
+            .help(windowsHelp(usage, isGo: isGo, now: context.date))
+        }
+    }
+
+    private func windowsHelp(_ usage: ProviderUsage, isGo: Bool, now: Date) -> String {
+        let stamp = usage.updatedAt.map { Formatting.relative($0, now: now) } ?? "—"
+        switch provider {
+        case .codex: return "From Codex logs, updated \(stamp)"
+        case .opencode: return isGo ? "From your OpenCode Go account, updated \(stamp)" : "From the local opencode database, updated \(stamp)"
+        case .claude: return ""
         }
     }
 }
@@ -144,6 +161,7 @@ private struct ProviderUsageBlock: View {
 /// Another coding subscription: its tile, name and plan, then the same limit rows as Claude and Codex.
 private struct PlanUsageBlock: View {
     let usage: PlanUsage
+    @EnvironmentObject private var preferences: Preferences
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -181,7 +199,7 @@ private struct PlanUsageBlock: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(usage.windows) { window in
-                    UsageWindowRow(window: window, tint: usage.tint, now: context.date)
+                    UsageWindowRow(window: window, tint: usage.tint, now: context.date, showsRemaining: preferences.planUsageShowsRemaining)
                 }
             }
             .help("Key from \(usage.source), updated \(usage.updatedAt.map { Formatting.relative($0, now: context.date) } ?? "—")")
@@ -211,6 +229,8 @@ private struct UsageWindowRow: View {
     let tint: Color
     let now: Date
     var breakdown: [UsageShare] = []
+    /// Overrides the global reading for "Other plans" rows: nil uses the Claude Code setting.
+    var showsRemaining: Bool? = nil
     @EnvironmentObject private var preferences: Preferences
     private var showPace: Bool { preferences.paceWarnings }
     private var compact: Bool { preferences.panelWidth < 640 }
@@ -223,7 +243,7 @@ private struct UsageWindowRow: View {
         }
         // Remaining mode reads like a battery: the bar empties as you use it, and the tick
         // marks how much time is left, so a fill shorter than the tick means you are over pace.
-        let remaining = preferences.usageShowsRemaining
+        let remaining = showsRemaining ?? preferences.usageShowsRemaining
         // What is left rounds down, so "100% left" only appears before anything is used.
         let shown = remaining ? (100 - window.percent).rounded(.down) : window.percent.rounded()
         let elapsed = window.elapsedFraction(at: now)

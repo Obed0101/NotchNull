@@ -206,6 +206,9 @@ final class Preferences: ObservableObject {
     @Published var paceWarnings: Bool { didSet { save(paceWarnings, Keys.paceWarnings) } }
     /// Show what is left of each limit (like a battery) instead of what has been used.
     @Published var usageShowsRemaining: Bool { didSet { save(usageShowsRemaining, Keys.usageShowsRemaining) } }
+    /// The same choice for the "Other plans" rows (GLM, Kimi, MiniMax, OpenCode Go, Copilot). Off by
+    /// default, so those rows read "% used" like each provider's own dashboard.
+    @Published var planUsageShowsRemaining: Bool { didSet { save(planUsageShowsRemaining, Keys.planUsageShowsRemaining) } }
     /// Swipe left or right on the open panel background to move through tabs.
     @Published var tabSwipeEnabled: Bool { didSet { save(tabSwipeEnabled, Keys.tabSwipe) } }
     /// Hide the notch on a display while a fullscreen app covers that display.
@@ -241,6 +244,9 @@ final class Preferences: ObservableObject {
     @Published var agentsEnabled: Bool { didSet { save(agentsEnabled, "agentsEnabled") } }
     @Published var codexEnabled: Bool { didSet { save(codexEnabled, "codexEnabled") } }
     @Published var opencodeEnabled: Bool { didSet { save(opencodeEnabled, "opencodeEnabled") } }
+    /// The user pressed Allow for reading OpenCode's active account through `opencode auth export`.
+    /// Until then the export is never run and only the legacy env/auth.json keys are used.
+    @Published var opencodeAccountUsageAllowed: Bool { didSet { save(opencodeAccountUsageAllowed, "opencodeAccountUsageAllowed") } }
     @Published var claudeUsageEnabled: Bool { didSet { save(claudeUsageEnabled, "claudeUsageEnabled") } }
     /// The user pressed Allow for reading Claude Code's sign-in from the keychain. Until then the
     /// keychain is never touched, so macOS never asks on its own.
@@ -273,6 +279,7 @@ final class Preferences: ObservableObject {
         static let staggerContent = "staggerContent"
         static let emissionIntensity = "emissionIntensity", glowNeedsYou = "glowNeedsYou", hideNotch = "hideNotch"
         static let paceWarnings = "paceWarnings", homeRows = "homeRows", hiddenHomeWidgets = "hiddenHomeWidgets", usageShowsRemaining = "usageShowsRemaining"
+        static let planUsageShowsRemaining = "planUsageShowsRemaining"
         static let tabSwipe = "tabSwipe"
         static let hideOnFullscreen = "hideOnFullscreen", checkForUpdates = "checkForUpdates"
         static let sounds = "sounds", tabOrder = "tabOrder", hiddenTabs = "hiddenTabs", disabledActivities = "disabledActivities"
@@ -293,7 +300,7 @@ final class Preferences: ObservableObject {
 
     static let factoryDefaults: [String: Any] = [
         Keys.emissionIntensity: 0.7, Keys.glowNeedsYou: true, Keys.hideNotch: false, Keys.paceWarnings: true,
-        Keys.usageShowsRemaining: true, Keys.tabSwipe: true, Keys.hideOnFullscreen: true, Keys.checkForUpdates: true,
+        Keys.usageShowsRemaining: true, Keys.planUsageShowsRemaining: false, Keys.tabSwipe: true, Keys.hideOnFullscreen: true, Keys.checkForUpdates: true,
         Keys.panelWidth: 500.0, Keys.panelHeight: 148.0, Keys.closedExtraWidth: 0.0, Keys.activityWidthScale: 1.0,
         Keys.bodyOpacity: 1.0, Keys.cornerScale: 1.0, Keys.shadow: true,
         Keys.animationSpeed: 1.35, Keys.bounce: 0.12, Keys.hoverDelay: 0.04, Keys.closeDelay: 0.3, Keys.staggerContent: true,
@@ -307,7 +314,7 @@ final class Preferences: ObservableObject {
         "musicEnabled": true, "musicWings": true, "hudEnabled": true, "replaceSystemHUD": false,
         "trayEnabled": true, "clipboardEnabled": true, "screenshotsEnabled": true, "downloadsEnabled": true,
         "batteryEnabled": true, "accessoriesEnabled": true, "calendarEnabled": true, "agentsEnabled": true,
-        "codexEnabled": true, "opencodeEnabled": true, "claudeUsageEnabled": true, "planUsageEnabled": true, "agentWings": true, "mirrorEnabled": false,
+        "codexEnabled": true, "opencodeEnabled": true, "opencodeAccountUsageAllowed": false, "claudeUsageEnabled": true, "planUsageEnabled": true, "agentWings": true, "mirrorEnabled": false,
         "statsEnabled": true,
     ]
 
@@ -356,6 +363,7 @@ final class Preferences: ObservableObject {
         staggerContent = defaults.bool(forKey: Keys.staggerContent)
         paceWarnings = defaults.bool(forKey: Keys.paceWarnings)
         usageShowsRemaining = defaults.bool(forKey: Keys.usageShowsRemaining)
+        planUsageShowsRemaining = defaults.bool(forKey: Keys.planUsageShowsRemaining)
         tabSwipeEnabled = defaults.bool(forKey: Keys.tabSwipe)
         hideOnFullscreen = defaults.bool(forKey: Keys.hideOnFullscreen)
         checkForUpdates = defaults.bool(forKey: Keys.checkForUpdates)
@@ -395,6 +403,7 @@ final class Preferences: ObservableObject {
         agentsEnabled = defaults.bool(forKey: "agentsEnabled")
         codexEnabled = defaults.bool(forKey: "codexEnabled")
         opencodeEnabled = defaults.bool(forKey: "opencodeEnabled")
+        opencodeAccountUsageAllowed = defaults.bool(forKey: "opencodeAccountUsageAllowed")
         claudeUsageEnabled = defaults.bool(forKey: "claudeUsageEnabled")
         planUsageEnabled = defaults.bool(forKey: "planUsageEnabled")
         agentWings = defaults.bool(forKey: "agentWings")

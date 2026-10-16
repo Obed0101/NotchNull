@@ -104,12 +104,16 @@ enum SnapshotRenderer {
         renderSettingsPage("82-settings-style", services: services, to: directory) { StyleSettings() }
         renderSettingsPage("85-settings-displays", services: services, to: directory) { DisplaySettings() }
         renderSettingsPage("83-settings-about", services: services, to: directory) { AboutSettings() }
+        let savedAccountConsent = preferences.opencodeAccountUsageAllowed
+        preferences.opencodeAccountUsageAllowed = true
+        renderSettingsPage("86-settings-agents", services: services, to: directory) { AgentSettings() }
+        preferences.opencodeAccountUsageAllowed = savedAccountConsent
         if let next = AppVersion("\(AppVersion.current.parts.first ?? 0).99.0") {
             services.updates.preview(.available(.init(version: next, page: Constants.Links.releases, asset: Constants.Links.releases, sha256: nil)))
             renderSettingsPage("84-settings-about-update", services: services, to: directory) { AboutSettings() }
             services.updates.preview(.idle)
         }
-        let count: Int = [states.count, medium.count, large.count, wideClosed.count, island.count, 9].reduce(0, +)
+        let count: Int = [states.count, medium.count, large.count, wideClosed.count, island.count, 10].reduce(0, +)
         print("Rendered \(count) snapshots to \(directory.path)")
     }
 
@@ -290,7 +294,16 @@ enum SnapshotRenderer {
                 windows: [UsageWindow(id: "kimi-limit_7d", label: "Week", percent: 64, resetsAt: now.addingTimeInterval(2 * 86_400), duration: 7 * 86_400)],
                 updatedAt: now, state: .ready
             ),
-        ])
+            PlanUsage(
+                id: OpenCodeGoPlan.planID, title: "OpenCode Go", monogram: "Go", tint: Theme.Accent.opencode, source: "OpenCode · Default",
+                windows: [
+                    UsageWindow(id: "opencode-rolling", label: "5 hours", percent: 5, resetsAt: now.addingTimeInterval(3.2 * 3600), duration: 5 * 3600),
+                    UsageWindow(id: "opencode-weekly", label: "Week", percent: 22, resetsAt: now.addingTimeInterval(3.4 * 86_400), duration: 7 * 86_400),
+                    UsageWindow(id: "opencode-monthly", label: "Month", percent: 11, resetsAt: now.addingTimeInterval(29 * 86_400), duration: 30 * 86_400),
+                ],
+                updatedAt: now, state: .ready
+            ),
+        ], openCodeAccount: .account(token: "", label: "Default"))
         services.agents.preview(
             warning: .init(provider: "Codex", window: UsageWindow(id: "primary", label: "5 hours", percent: 82, resetsAt: now.addingTimeInterval(3.1 * 3600), duration: 5 * 3600)),
             hooksInstalled: true

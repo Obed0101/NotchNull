@@ -12,9 +12,22 @@ struct PlanCredentialSources: Sendable {
     var claudeEnvironment: [String: String] = [:]
     /// GitHub OAuth tokens saved by the Copilot editor plugins.
     var copilotTokens: [String] = []
+    /// The OpenCode Console account resolved through `opencode auth export`, when the user allowed
+    /// it. Nil keeps the legacy environment and `auth.json` behavior only.
+    var openCodeAccount: OpenCodeAuthExport.Selection?
 
-    static func load(home: URL = Constants.Paths.home, environment: [String: String] = ProcessInfo.processInfo.environment) -> PlanCredentialSources {
+    /// Reads the local sources and — only when `accountUsageAllowed` — the active OpenCode account.
+    /// `accountExport` is injected so a test can prove the export is never run without consent.
+    static func load(
+        home: URL = Constants.Paths.home,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        accountUsageAllowed: Bool = false,
+        accountExport: (URL, [String: String]) -> OpenCodeAuthExport.Selection = { home, environment in
+            OpenCodeAuthExport.resolve(home: home, environment: environment)
+        }
+    ) -> PlanCredentialSources {
         var sources = PlanCredentialSources(environment: environment)
+        if accountUsageAllowed { sources.openCodeAccount = accountExport(home, environment) }
         if let auth = readJSON(home.appendingPathComponent(".local/share/opencode/auth.json")) {
             for (provider, entry) in auth {
                 guard let entry = entry as? [String: Any] else { continue }

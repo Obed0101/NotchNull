@@ -100,6 +100,28 @@ final class PlanUsageTests: XCTestCase {
         XCTAssertEqual(snapshot.windows[0].resetsAt, now.addingTimeInterval(18100))
     }
 
+    func testOpenCodeGoReadsTheMonthlyWindowAndAbsoluteResetDates() throws {
+        // The live response describes each window with an absolute `resetsAt` ISO date and a status.
+        let json = """
+        {"usage":{"rolling":{"status":"ok","percent":5,"resetsAt":"2026-10-16T01:00:48.000Z"},
+                  "weekly":{"status":"ok","percent":22,"resetsAt":"2026-10-19T00:00:00.000Z"},
+                  "monthly":{"status":"ok","percent":11,"resetsAt":"2026-11-15T14:52:07.000Z"}}}
+        """
+        let snapshot = try OpenCodeGoPlan.parse(Data(json.utf8), now: now)
+        XCTAssertEqual(snapshot.windows.map(\.label), ["5 hours", "Week", "Month"])
+        XCTAssertEqual(snapshot.windows.map(\.percent), [5, 22, 11])
+        XCTAssertEqual(snapshot.windows[2].duration, 30 * 86_400)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        XCTAssertEqual(snapshot.windows[0].resetsAt, iso.date(from: "2026-10-16T01:00:48.000Z"))
+        XCTAssertEqual(snapshot.windows[2].resetsAt, iso.date(from: "2026-11-15T14:52:07.000Z"))
+    }
+
+    func testOpenCodeGoEmptyOrMalformedPayloadsAreSafe() {
+        XCTAssertThrowsError(try OpenCodeGoPlan.parse(Data(#"{"usage":{}}"#.utf8))) { XCTAssertEqual($0 as? PlanError, .noSubscription) }
+        XCTAssertThrowsError(try OpenCodeGoPlan.parse(Data("not json".utf8))) { XCTAssertEqual($0 as? PlanError, .unavailable("Unreadable OpenCode response")) }
+    }
+
     // MARK: Copilot
 
     func testCopilotSkipsUnlimitedQuotasAndConvertsRemainingToUsed() throws {
@@ -140,5 +162,44 @@ final class PlanUsageTests: XCTestCase {
     func testEnvironmentKeyWinsAndChinaVariablesPickTheChinaHost() {
         let sources = PlanCredentialSources(environment: ["GLM_API_KEY": "cn-key"])
         XCTAssertEqual(ZaiPlan().credential(in: sources), PlanCredential(key: "cn-key", source: "GLM_API_KEY", host: ZaiPlan.chinaHost))
+    }
+
+    // MARK: OpenCode Go credential precedence
+
+    func testOpenCodeGoPrefersEnvironmentThenTheActiveAccountThenLegacyAuth() {
+        let legacy = PlanCredentialSources(openCode: ["opencode": ["key": "legacy-key"]])
+        XCTAssertEqual(OpenCodeGoPlan().credential(in: legacy), PlanCredential(key: "legacy-key", source: "OpenCode"))
+
+        var account = legacy
+        account.openCodeAccount = .account(token: "account-key", label: "Work")
+        XCTAssertEqual(OpenCodeGoPlan().credential(in: account), PlanCredential(key: "account-key", source: "OpenCode · Work"))
+
+        var env = account
+        env.environment = ["OPENCODE_API_KEY": "env-key"]
+        XCTAssertEqual(OpenCodeGoPlan().credential(in: env), PlanCredential(key: "env-key", source: "OPENCODE_API_KEY"))
+    }
+
+    func testAbsentConsentNeverRunsTheExportAndKeepsTheLegacyPath() {
+        var exportCalls = 0
+        let sources = PlanCredentialSources.load(
+            home: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+            environment: [:],
+            accountUsageAllowed: false,
+            accountExport: { _, _ in exportCalls += 1; return .account(token: "secret", label: "x") }
+        )
+        XCTAssertEqual(exportCalls, 0)
+        XCTAssertNil(sources.openCodeAccount)
+        XCTAssertNil(OpenCodeGoPlan().credential(in: sources))
+    }
+
+    func testConsentResolvesTheActiveAccountForTheGoPlan() {
+        let sources = PlanCredentialSources.load(
+            home: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+            environment: [:],
+            accountUsageAllowed: true,
+            accountExport: { _, _ in .account(token: "active-key", label: "Default") }
+        )
+        XCTAssertEqual(sources.openCodeAccount, .account(token: "active-key", label: "Default"))
+        XCTAssertEqual(OpenCodeGoPlan().credential(in: sources), PlanCredential(key: "active-key", source: "OpenCode · Default"))
     }
 }
