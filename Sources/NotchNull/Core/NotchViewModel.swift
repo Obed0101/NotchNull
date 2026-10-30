@@ -47,6 +47,9 @@ final class NotchViewModel: ObservableObject {
     }
 
     let geometry: NotchGeometry
+    /// The display's persistent UUID; overrides in `Preferences.displayShapes` are keyed by it.
+    /// Empty for previews and snapshots, which match no override.
+    let displayID: String
 
     @Published private(set) var phase: Phase = .closed
     @Published var selectedTab: NotchTab = .home
@@ -67,12 +70,13 @@ final class NotchViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private let preferences = Preferences.shared
 
-    convenience init(geometry: NotchGeometry) {
-        self.init(geometry: geometry, center: ActivityCenter.shared)
+    convenience init(geometry: NotchGeometry, displayID: String = "") {
+        self.init(geometry: geometry, displayID: displayID, center: ActivityCenter.shared)
     }
 
-    init(geometry: NotchGeometry, center: ActivityCenter) {
+    init(geometry: NotchGeometry, displayID: String = "", center: ActivityCenter) {
         self.geometry = geometry
+        self.displayID = displayID
         center.$current
             .receive(on: RunLoop.main)
             .sink { [weak self] kind in self?.activityChanged(kind) }
@@ -84,6 +88,12 @@ final class NotchViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.objectWillChange.send() } }
             .store(in: &cancellables)
+        // Changing a display's shape or the satellites changes what the body shows.
+        Publishers.CombineLatest3(preferences.$shapeStyle, preferences.$displayShapes, preferences.$islandSatellites)
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.activityMoved() }
+            .store(in: &cancellables)
     }
 
     // MARK: Geometry
@@ -91,15 +101,23 @@ final class NotchViewModel: ObservableObject {
     /// The hardware notch (or the virtual one on displays without a notch).
     var notchSize: CGSize { geometry.notchSize }
 
+    /// How this display presents the body: its own override or the global default, with a real
+    /// camera housing always winning.
+    var presentation: DisplayPresentation {
+        DisplayShapeResolver.resolve(
+            default: preferences.shapeStyle,
+            override: preferences.displayShapes[displayID],
+            hasHardwareNotch: geometry.hasHardwareNotch
+        )
+    }
+
     /// Island style floats a pill instead of growing out of the notch. Automatic picks it on
     /// screens without a hardware notch, such as a MacBook at a resolution that leaves it out.
-    var isIsland: Bool {
-        switch preferences.shapeStyle {
-        case .auto: !geometry.hasHardwareNotch
-        case .notch: false
-        case .island: true
-        }
-    }
+    var isIsland: Bool { presentation.island }
+
+    /// Wings, OSDs and the open panel's header use one row across the middle: the island, or the
+    /// notch style on a screen that does not assume a camera housing.
+    var spansMiddle: Bool { presentation.spansMiddle }
 
     /// Height of the first row in every state: the notch, or the island pill.
     var rowHeight: CGFloat {
@@ -115,11 +133,12 @@ final class NotchViewModel: ObservableObject {
         return (geometry.hasHardwareNotch ? notchSize.height : 0) + CGFloat(preferences.islandTop)
     }
 
-    /// Room kept between the two wings: the camera housing, or a small gap in the island.
-    var wingGap: CGFloat { isIsland ? Theme.Size.islandWingGap : closedSize.width }
+    /// Room kept between the two wings: the camera housing, or a small gap in the island and in a
+    /// notch that does not assume a housing.
+    var wingGap: CGFloat { spansMiddle ? Theme.Size.islandWingGap : closedSize.width }
 
     /// Room kept in the middle of the panel header, for the same reason.
-    var headerGap: CGFloat { isIsland ? 8 : notchSize.width + 8 }
+    var headerGap: CGFloat { spansMiddle ? 8 : notchSize.width + 8 }
 
     /// Height of the open panel's header. The notch's header is the notch row; the island's is a
     /// little taller so the tabs clear its rounded top corners.
@@ -213,8 +232,14 @@ final class NotchViewModel: ObservableObject {
             // Wings hug their content: measured width + a small gap to the center + the outer padding.
             let wing = measuredWings[kind].map { $0 + Self.wingInnerGap + Self.wingOuterPadding } ?? layout.wing
             let wingsWidth = wingGap + wing * 2 * scale
-            let contentWidth = isIsland ? layout.islandWidth.map { $0 * scale } ?? wingsWidth : wingsWidth
-            let width = max(contentWidth, layout.minWidth * scale, isIsland ? closedSize.width : closedSize.width + 40)
+            let width: CGFloat
+            if isIsland {
+                width = max(layout.islandWidth.map { $0 * scale } ?? wingsWidth, layout.minWidth * scale, closedSize.width)
+            } else {
+                // The notch keeps one footprint whether or not it reserves the housing; only the
+                // centre gap changes, so OSDs and banners can use the middle at the same width.
+                width = max(closedSize.width + wing * 2 * scale, layout.minWidth * scale, closedSize.width + 40)
+            }
             size = CGSize(width: width, height: contentRowHeight + layout.extraHeight)
         }
         // The window the body draws in is the only hard limit.
@@ -524,9 +549,25 @@ final class NotchViewModel: ObservableObject {
     }
 
     private func activityChanged(_ kind: ActivityKind?) {
-        // On the island the left satellite already is the player; music in the pill would show it twice.
-        activity = kind == .music && showsMusicSatellite ? nil : kind
+        incomingActivity = kind
+        updateActivity()
         apply(kind != nil ? Motion.activity : Motion.close)
+    }
+
+    /// The last kind the activity centre reported, kept so a presentation change can re-derive
+    /// what the body shows without waiting for a new event.
+    private var incomingActivity: ActivityKind?
+
+    /// Music lives in the island's satellite, so it is not shown in the pill there. A shape or
+    /// satellite change re-derives this from the last event instead of keeping a stale wing.
+    private func updateActivity() {
+        activity = incomingActivity == .music && showsMusicSatellite ? nil : incomingActivity
+    }
+
+    private func activityMoved() {
+        let before = activity
+        updateActivity()
+        if activity != before { apply(Motion.state) }
     }
 
     private func apply(_ animation: Animation) {

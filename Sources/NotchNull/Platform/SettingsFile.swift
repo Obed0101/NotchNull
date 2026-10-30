@@ -131,6 +131,51 @@ final class SettingsFile: ObservableObject {
         color("look.accent", "Accent for the selected tab, toggles and sliders.", \.accentHex),
         bool("look.accentFollowsMac", "Use the macOS accent color instead of look.accent.", \.accentFollowsSystem),
         choice("look.shape", "\"auto\" floats an island on screens without a hardware notch; \"notch\" or \"island\" force one.", \.shapeStyle),
+        SettingField(
+            key: "look.displays", type: "object of display UUID to { shape, housingGap }",
+            summary: "One screen's own shape, overriding look.shape. shape is \"auto\", \"notch\" or \"island\"; housingGap says whether the notch leaves room for a camera housing. Displays not listed follow look.shape.",
+            read: { preferences in
+                .object(Dictionary(uniqueKeysWithValues: preferences.displayShapes.map { id, shape in
+                    (id, .object(["shape": .string(shape.style.rawValue), "housingGap": .bool(shape.housingGap)]))
+                }))
+            },
+            write: { preferences, value in
+                guard let entries = value.object else {
+                    return "should be an object of display UUIDs."
+                }
+                var shapes: [String: Preferences.DisplayShape] = [:]
+                var problems: [String] = []
+                for (id, entry) in entries {
+                    guard let uuid = UUID(uuidString: id) else {
+                        problems.append("\"\(id)\" is not a display UUID.")
+                        continue
+                    }
+                    guard let fields = entry.object else {
+                        problems.append("\(id): should be an object with shape and housingGap.")
+                        continue
+                    }
+                    for key in fields.keys where key != "shape" && key != "housingGap" {
+                        problems.append("\(id): unknown key \(key).")
+                    }
+                    guard let raw = fields["shape"]?.string, let style = Preferences.ShapeStyle(rawValue: raw) else {
+                        problems.append("\(id).shape: use \"auto\", \"notch\" or \"island\".")
+                        continue
+                    }
+                    var housingGap = true
+                    if let stored = fields["housingGap"] {
+                        guard let flag = stored.bool else {
+                            problems.append("\(id).housingGap: use true or false.")
+                            continue
+                        }
+                        housingGap = flag
+                    }
+                    // Uppercase so the key matches the UUID macOS reports for the screen.
+                    shapes[uuid.uuidString] = Preferences.DisplayShape(style: style, housingGap: housingGap)
+                }
+                preferences.displayShapes = shapes
+                return problems.isEmpty ? nil : problems.joined(separator: " ")
+            }
+        ),
         number("look.opacity", "Body opacity.", \.bodyOpacity, Preferences.Limits.bodyOpacity),
         number("look.roundness", "Corner radius scale.", \.cornerScale, Preferences.Limits.cornerScale),
         bool("look.shadow", "Shadow under the open panel.", \.shadow),

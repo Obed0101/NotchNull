@@ -5,6 +5,7 @@ import SwiftUI
 
 struct StyleSettings: View {
     @EnvironmentObject private var preferences: Preferences
+    @State private var displays = NotchDisplay.connected
 
     private static let accentSwatches: [Int] = [0x3DDBB0, 0x5AC8FA, 0xA78BFA, 0xFF5E8A, 0xFF9F0A, 0xFFD60A, 0x30D158, 0xFFFFFF]
     private static let tintSwatches: [Int] = [0x1C1B22, 0x10213A, 0x2A1433, 0x1E2A1F, 0x2B1A12, 0x2A2A2E]
@@ -23,14 +24,93 @@ struct StyleSettings: View {
         }
     }
 
-    /// What Automatic resolves to right now.
+    /// The island's own knobs are global, so they show whenever any screen can use them.
+    private var showsIslandSettings: Bool {
+        preferences.shapeStyle != .notch || eligibleDisplays.contains(where: resolvedIsland)
+    }
+
+    /// Screens that currently get a panel, in the order macOS reports them.
+    private var eligibleDisplays: [NotchDisplay] {
+        DisplaySelection.eligible(displays, mode: preferences.displayMode, selected: preferences.selectedDisplays)
+    }
+
+    /// Overrides saved for screens that are not connected right now.
+    private var disconnectedOverrides: [String] {
+        let connected = Set(displays.map(\.persistentID))
+        return preferences.displayShapes.keys.filter { !connected.contains($0) }.sorted()
+    }
+
+    /// Per-screen rows matter once screens can differ, once one is overridden, or when a screen
+    /// could offer the housing option.
+    private var showsScreenRows: Bool {
+        eligibleDisplays.count > 1 || !preferences.displayShapes.isEmpty || eligibleDisplays.contains { !$0.hasNotch }
+    }
+
+    /// What Automatic resolves to right now for the global default.
     private var shapeSubtitle: String {
         guard preferences.shapeStyle == .auto else { return preferences.shapeStyle == .island ? "Floating island everywhere." : "Grows out of the notch everywhere." }
         return screenHasNotch ? "This screen shows its notch, so the notch is used." : "No notch on this screen, so it floats as an island."
     }
 
+    private func resolvedStyle(_ display: NotchDisplay) -> Preferences.ShapeStyle {
+        preferences.displayShapes[display.persistentID]?.style ?? preferences.shapeStyle
+    }
+
+    private func resolvedIsland(_ display: NotchDisplay) -> Bool {
+        switch resolvedStyle(display) {
+        case .auto: !display.hasNotch
+        case .notch: false
+        case .island: true
+        }
+    }
+
+    private func screenSubtitle(_ display: NotchDisplay) -> String {
+        let size = "\(Int(display.frame.width)) × \(Int(display.frame.height)) pt"
+        let effective: String
+        if resolvedIsland(display) {
+            effective = "Island"
+        } else if !display.hasNotch, preferences.displayShapes[display.persistentID]?.housingGap == false {
+            effective = "Notch, no camera housing"
+        } else {
+            effective = "Notch"
+        }
+        return "\(size) · \(effective)"
+    }
+
+    /// Nil means Default: the screen follows the global shape and stores no entry.
+    private func shapeBinding(for display: NotchDisplay) -> Binding<Preferences.ShapeStyle?> {
+        Binding(
+            get: { preferences.displayShapes[display.persistentID]?.style },
+            set: { style in
+                var shapes = preferences.displayShapes
+                if let style {
+                    var entry = shapes[display.persistentID] ?? Preferences.DisplayShape(style: style)
+                    entry.style = style
+                    shapes[display.persistentID] = entry
+                } else {
+                    shapes[display.persistentID] = nil
+                }
+                preferences.displayShapes = shapes
+            }
+        )
+    }
+
+    /// Editing the housing stores the screen's current shape, so the row becomes explicit.
+    private func housingBinding(for display: NotchDisplay) -> Binding<Bool> {
+        Binding(
+            get: { preferences.displayShapes[display.persistentID]?.housingGap ?? true },
+            set: { on in
+                var shapes = preferences.displayShapes
+                var entry = shapes[display.persistentID] ?? Preferences.DisplayShape(style: resolvedStyle(display))
+                entry.housingGap = on
+                shapes[display.persistentID] = entry
+                preferences.displayShapes = shapes
+            }
+        )
+    }
+
     var body: some View {
-        SettingsGroup(title: "Shape", footer: "Automatic floats an island on screens without a hardware notch, including a MacBook set to a resolution that leaves the notch area out, and grows out of the notch everywhere else.") {
+        SettingsGroup(title: "Shape", footer: "Automatic floats an island on screens without a hardware notch, including a MacBook set to a resolution that leaves the notch area out, and grows out of the notch everywhere else. Each screen can keep its own shape; Default follows this picker. On a screen with no notch, Notch can drop the assumed camera housing so OSDs and the open panel use the full width.") {
             SettingsRow(title: "Shape", subtitle: shapeSubtitle, symbol: "capsule.fill", tint: Theme.Accent.tray) {
                 Picker("", selection: $preferences.shapeStyle.animation(Motion.state)) {
                     ForEach(Preferences.ShapeStyle.allCases) { Text($0.title).tag($0) }
@@ -39,7 +119,37 @@ struct StyleSettings: View {
                 .labelsHidden()
                 .frame(width: 240)
             }
-            if preferences.shapeStyle != .notch {
+            if showsScreenRows {
+                ForEach(eligibleDisplays) { display in
+                    SettingsRow(title: display.name, subtitle: screenSubtitle(display),
+                        symbol: display.builtIn ? "laptopcomputer" : "display", tint: Theme.Accent.system) {
+                        Picker("", selection: shapeBinding(for: display).animation(Motion.state)) {
+                            Text("Default").tag(Preferences.ShapeStyle?.none)
+                            ForEach([Preferences.ShapeStyle.notch, .island]) { style in
+                                Text(style.title).tag(Optional(style))
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 130)
+                    }
+                    if !display.hasNotch, resolvedStyle(display) == .notch {
+                        SettingsToggle(
+                            title: "Assume a camera housing",
+                            subtitle: "On \(display.name): off lets OSDs and the open panel use the middle.",
+                            symbol: "camera.metering.unknown",
+                            tint: Theme.Accent.tray,
+                            isOn: housingBinding(for: display).animation(Motion.state)
+                        )
+                        .transition(.opacity.combined(with: .offset(y: -4)))
+                    }
+                }
+                ForEach(disconnectedOverrides, id: \.self) { id in
+                    SettingsRow(title: "Disconnected display", subtitle: id, symbol: "display.slash", tint: Theme.Accent.warning) {
+                        Button("Forget") { preferences.displayShapes[id] = nil }
+                    }
+                }
+            }
+            if showsIslandSettings {
                 SettingsRow(title: "Island shows", symbol: "clock.fill", tint: Theme.Accent.tray) {
                     Picker("", selection: $preferences.pillContent.animation(Motion.state)) {
                         ForEach(Preferences.PillContent.allCases) { Text($0.title).tag($0) }
@@ -53,6 +163,9 @@ struct StyleSettings: View {
                 SliderRow(title: "Island height", symbol: "arrow.up.and.down", tint: Theme.Accent.tray, value: $preferences.islandHeight, range: Preferences.Limits.islandHeight, step: 1, format: { $0 < 1 ? "Menu bar" : "\(Int($0)) pt" })
                 SliderRow(title: "Distance from top", symbol: "arrow.down.to.line", tint: Theme.Accent.tray, value: $preferences.islandTop, range: Preferences.Limits.islandTop, step: 1, format: { "\(Int($0)) pt" })
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            displays = NotchDisplay.connected
         }
 
         SettingsGroup(title: "Size", footer: "Type any value by clicking the number. On a notched screen the closed notch can only grow, since nothing can be drawn over the camera housing. The Agents tab fits its content up to the open panel height; other tabs keep that height.") {

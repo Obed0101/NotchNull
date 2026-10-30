@@ -59,6 +59,7 @@ final class NotchCoordinator {
             status["displayName"] = .string(display.name)
             status["hasHardwareNotch"] = .bool(display.hasNotch)
             status["shape"] = .string(controller.model.isIsland ? "island" : "notch")
+            status["housingGap"] = .bool(controller.model.presentation.housingGap)
             status["screenFrame"] = .object(["x": .number(display.frame.minX), "y": .number(display.frame.minY),
                 "width": .number(display.frame.width), "height": .number(display.frame.height)])
             return .object(status)

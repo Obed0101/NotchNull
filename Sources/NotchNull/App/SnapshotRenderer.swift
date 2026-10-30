@@ -91,6 +91,23 @@ enum SnapshotRenderer {
         preferences.pillContent = .dateClock
         render([("97-island-date-clock", .closed, .home)], geometry: islandGeometry, services: services, to: directory)
         preferences.pillContent = savedContent
+        // The same screen in the notch style without the assumed camera housing: flush to the top,
+        // one row across the middle, still the notch outline.
+        let noHousingID = "SNAPSHOT-NO-HOUSING"
+        let savedShapes = preferences.displayShapes
+        preferences.displayShapes[noHousingID] = Preferences.DisplayShape(style: .notch, housingGap: false)
+        let noHousing: [State] = [
+            ("80-nohousing-closed", .closed, .home), ("81-nohousing-volume", .activity(.volume), .home),
+            ("82-nohousing-music", .activity(.music), .home), ("83-nohousing-needs-you", .activity(.needsYou), .home),
+            ("84-nohousing-open-home", .open, .home),
+        ]
+        render(noHousing, geometry: islandGeometry, services: services, to: directory, displayID: noHousingID)
+        // The same two HUDs with the housing assumed, to compare their footprint.
+        preferences.displayShapes[noHousingID] = Preferences.DisplayShape(style: .notch)
+        render([
+            ("85-housing-on-volume", .activity(.volume), .home), ("86-housing-on-music", .activity(.music), .home),
+        ], geometry: islandGeometry, services: services, to: directory, displayID: noHousingID)
+        preferences.displayShapes = savedShapes
         services.devices.preview(DeviceEvent(change: .connected, name: "ESP32 / CP210x board", symbol: "cpu", detail: "/dev/cu.usbserial-0001"))
         render([("70-device-serial", .activity(.accessory), .home)], geometry: geometry, services: services, to: directory)
         services.devices.preview(DeviceEvent(change: .disconnected, name: "JBL LIVE660NC", symbol: "headphones", detail: "Bluetooth"))
@@ -118,7 +135,23 @@ enum SnapshotRenderer {
         render([("74-widget-wing", .activity(.custom), .home)], geometry: geometry, services: services, to: directory)
         renderSettingsPage("80-settings-build", services: services, to: directory) { BuildSettings() }
         renderSettingsPage("81-settings-setup", services: services, to: directory) { SetupSettings() }
+        // The style page shows every connected screen, so the per-screen rows are visible here even
+        // when the reviewer's own settings show the notch on one display only.
+        let pageMode = preferences.displayMode
+        let pageShape = preferences.shapeStyle
+        let pageShapes = preferences.displayShapes
+        preferences.displayMode = .all
+        preferences.shapeStyle = .auto
+        preferences.displayShapes = [:]
         renderSettingsPage("82-settings-style", services: services, to: directory) { StyleSettings() }
+        // The same page with the notch chosen, where the housing option appears per screen, plus an
+        // override saved for a screen that is not connected.
+        preferences.shapeStyle = .notch
+        preferences.displayShapes = ["DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD": .init(style: .island)]
+        renderSettingsPage("89-settings-style-notch", services: services, to: directory) { StyleSettings() }
+        preferences.displayMode = pageMode
+        preferences.shapeStyle = pageShape
+        preferences.displayShapes = pageShapes
         renderSettingsPage("85-settings-displays", services: services, to: directory) { DisplaySettings() }
         renderSettingsPage("83-settings-about", services: services, to: directory) { AboutSettings() }
         let savedAccountConsent = preferences.opencodeAccountUsageAllowed
@@ -241,15 +274,16 @@ enum SnapshotRenderer {
         _ states: [(name: String, phase: NotchViewModel.Phase, tab: NotchTab)],
         geometry: NotchGeometry, services: AppServices, to directory: URL,
         satellite: NotchViewModel.SatelliteSide? = nil,
-        fittedPanelHeights: [NotchTab: CGFloat] = [:]
+        fittedPanelHeights: [NotchTab: CGFloat] = [:],
+        displayID: String = ""
     ) {
         for (name, phase, tab) in states {
             // Seed content-fitted tabs from a measurement pass. The final render then draws at the
             // target size immediately instead of depending on a preference change mid-render.
             let heights = fittedPanelHeights.isEmpty
-                ? measuredFittedPanelHeights(phase: phase, tab: tab, geometry: geometry, services: services, satellite: satellite)
+                ? measuredFittedPanelHeights(phase: phase, tab: tab, geometry: geometry, services: services, satellite: satellite, displayID: displayID)
                 : fittedPanelHeights
-            let model = NotchViewModel(geometry: geometry, center: ActivityCenter())
+            let model = NotchViewModel(geometry: geometry, displayID: displayID, center: ActivityCenter())
             model.preview(phase: phase, tab: tab, satellite: satellite, fittedPanelHeights: heights)
             let view = SnapshotStage(transparent: transparent, now: SnapshotFixtureDate.display) {
                 NotchRootView()
@@ -276,10 +310,11 @@ enum SnapshotRenderer {
         tab: NotchTab,
         geometry: NotchGeometry,
         services: AppServices,
-        satellite: NotchViewModel.SatelliteSide?
+        satellite: NotchViewModel.SatelliteSide?,
+        displayID: String = ""
     ) -> [NotchTab: CGFloat] {
         guard phase == .open, tab == .agents else { return [:] }
-        let model = NotchViewModel(geometry: geometry, center: ActivityCenter())
+        let model = NotchViewModel(geometry: geometry, displayID: displayID, center: ActivityCenter())
         model.preview(phase: phase, tab: tab, satellite: satellite)
         let view = SnapshotStage(transparent: transparent) {
             NotchRootView()

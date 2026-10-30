@@ -23,7 +23,7 @@ struct LevelActivity: View {
     @EnvironmentObject private var preferences: Preferences
     @Environment(\.wingContext) private var context
 
-    private var islandRowWidth: CGFloat {
+    private var spanningRowWidth: CGFloat {
         (ActivityKind.volume.layout.islandWidth ?? 196) * CGFloat(preferences.activityWidthScale)
     }
 
@@ -33,9 +33,9 @@ struct LevelActivity: View {
         // The body keeps the closed height and a fixed width, so each key press only moves the
         // fill, never the notch.
         Group {
-            if model.isIsland {
-                // Nothing sits in the island's middle, so the bar runs the whole row. The row keeps
-                // the HUD's own width while the island shrinks away, so the exit only clips and fades
+            if model.spansMiddle {
+                // Nothing sits in the middle, so the bar runs the whole row. The row keeps the
+                // HUD's own width while the body shrinks away, so the exit only clips and fades
                 // it instead of re-laying out the bar on every frame.
                 HStack(spacing: 8) {
                     icon(level, tint: tint)
@@ -45,7 +45,8 @@ struct LevelActivity: View {
                     value(level)
                 }
                 .padding(.horizontal, context.horizontalPadding)
-                .frame(width: islandRowWidth, height: context.rowHeight)
+                .frame(maxWidth: model.isIsland ? spanningRowWidth : .infinity)
+                .frame(height: context.rowHeight)
                 .condense(delay: Motion.stagger(1))
             } else {
                 // Beside the camera housing: icon and bar on the left wing, the value on the right.

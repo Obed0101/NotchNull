@@ -9,12 +9,18 @@ struct NotchDisplay: Identifiable, Equatable {
     let hasNotch: Bool
     let scale: CGFloat
 
+    /// The display's identity across reconnects, restarts and display-number changes.
+    static func persistentID(for screen: NSScreen) -> String {
+        let id = NotchGeometry.screenID(screen)
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() else { return "" }
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+
     @MainActor
     static var connected: [NotchDisplay] {
         NSScreen.screens.map { screen in
             let id = NotchGeometry.screenID(screen)
-            let uuid = CGDisplayCreateUUIDFromDisplayID(id).takeRetainedValue()
-            return NotchDisplay(id: id, persistentID: CFUUIDCreateString(nil, uuid) as String,
+            return NotchDisplay(id: id, persistentID: persistentID(for: screen),
                 name: screen.localizedName, frame: screen.frame, builtIn: NotchGeometry.isBuiltIn(screen),
                 hasNotch: NotchGeometry(screen: screen).hasHardwareNotch, scale: screen.backingScaleFactor)
         }
