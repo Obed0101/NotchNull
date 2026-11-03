@@ -8,7 +8,7 @@ Lets every connected display choose how the notch body is presented, and lets th
 
 ### Requirement: Shape resolves per display
 
-The system SHALL resolve the body shape of each display independently, from a global default (Automatic, Notch, or Island) and an optional per-display override (Default, Notch, or Island). Default means the display follows the global value.
+The system SHALL resolve the body shape of each display independently, from a global default (Automatic, Notch, or Island) and an optional per-display override (Default, Notch, Island, or Automatic). Default follows the global value; a per-display Automatic follows that display's hardware.
 
 #### Scenario: Default follows the global choice
 
@@ -29,6 +29,11 @@ The system SHALL resolve the body shape of each display independently, from a gl
 
 - **WHEN** a MacBook changes to a resolution that hides the notch while the global shape is Automatic
 - **THEN** that display switches to the island presentation without user action
+
+#### Scenario: A display's own Automatic ignores the global choice
+
+- **WHEN** the global shape is Notch and one display is set to Automatic
+- **THEN** that display floats an island if it shows no hardware notch, and the other displays still follow the global choice
 
 ### Requirement: Overrides persist by display identity
 
@@ -97,7 +102,7 @@ With the housing assumption disabled, the body SHALL keep the notch presentation
 
 ### Requirement: Configuration is exposed and resettable
 
-The global default and the per-display overrides SHALL be readable and writable through `settings.json` and reported per display in status output. Applying a setup preset or resetting look, size and motion SHALL clear every override.
+The global default and the per-display overrides SHALL be readable and writable through `settings.json` and reported per display in status output. Every value the file accepts MUST be selectable in the per-screen control, and every stored override SHALL be removable from Settings in any display mode. An entry that fails validation MUST NOT discard that display's stored override. Applying a setup preset or resetting look, size and motion SHALL clear every override.
 
 #### Scenario: Editing settings.json applies live
 
@@ -118,3 +123,33 @@ The global default and the per-display overrides SHALL be readable and writable 
 
 - **WHEN** `settings.json` contains an invalid per-display entry
 - **THEN** the problem is reported and the remaining entries still apply
+
+#### Scenario: A stored Automatic override is shown as Automatic
+
+- **WHEN** `settings.json` stores `"shape": "auto"` for a connected display
+- **THEN** that display's row shows Automatic as the selected value and reports the presentation Automatic resolves to for it
+
+#### Scenario: Every accepted override is selectable
+
+- **WHEN** a user opens the per-screen shape control
+- **THEN** Default, Notch, Island and Automatic are all offered, and choosing one stores exactly that value
+
+#### Scenario: A rejected entry keeps the override it already had
+
+- **WHEN** a display already has an override and its `look.displays` entry is then edited to an invalid value
+- **THEN** the problem is reported, the previously stored override for that display still applies, and the resolved presentation of that display does not change
+
+#### Scenario: An override can be deleted by omitting the entry
+
+- **WHEN** a display's entry is removed from `look.displays` and the file is saved
+- **THEN** that display falls back to the global shape and stores no override
+
+#### Scenario: An override for a screen that is not shown is still reachable
+
+- **WHEN** a display has a stored override and the current display mode gives that display no panel
+- **THEN** Settings lists that screen's override with the screen named, and offers a control that removes it
+
+#### Scenario: The row says whether the screen is connected
+
+- **WHEN** Settings lists a stored override for a screen that is not currently shown
+- **THEN** the row distinguishes a screen that is connected but not shown from one that is not connected
