@@ -20,7 +20,10 @@ Island) and lists each screen so it can keep its own choice: Default, Notch or
 Island. Default stores nothing and follows the global picker; choosing Default
 again forgets that screen's entry. Overrides are keyed by display UUID, so they
 survive reconnects, restarts and display-number changes. An override for a screen
-that is not connected is kept and can be forgotten from the same list.
+that is not connected is kept and can be forgotten from the same list, and so is one
+for a screen that is connected but gets no panel in the current display mode (for
+example Selected displays with that screen left out): that row is titled with the
+screen's name, so it is not mistaken for a disconnected one.
 
 Automatic resolves per screen: a display showing a hardware notch uses the notch,
 any other display floats an island. A MacBook that changes to a resolution
@@ -55,7 +58,9 @@ nothing and follows the global `look.shape` picker. All four choices are offered
 the per-screen menu, so a value written here is always visible and can be changed
 back.
 `housingGap` defaults to true. A syntactically valid UUID for a screen that is not
-connected is kept; an invalid entry is reported and does not stop the others.
+connected is kept; an invalid entry is reported and does not stop the others. An
+entry that fails validation leaves that screen's stored override alone, so a typo
+never changes or removes a shape; delete the entry instead to forget it.
 Applying a shape card in Setup, or "Reset look, size and motion", clears every
 override.
 

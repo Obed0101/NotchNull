@@ -198,6 +198,97 @@ final class DisplayShapeTests: XCTestCase {
         XCTAssertEqual(Preferences.shared.displayShapes[unknown], Preferences.DisplayShape(style: .island))
     }
 
+    func testARejectedEntryKeepsTheOverrideItAlreadyHad() {
+        let id = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
+        let stored = Preferences.DisplayShape(style: .island, housingGap: false)
+        Preferences.shared.displayShapes = [id: stored]
+        let before = DisplayShapeResolver.resolve(default: .auto, override: Preferences.shared.displayShapes[id], hasHardwareNotch: false)
+
+        // A typo in the shape is reported, and the screen keeps presenting exactly as it did.
+        let problems = SettingsFile.shared.apply(Data(#"{"look":{"displays":{"\#(id)":{"shape":"round"}}}}"#.utf8), isPatch: true)
+        XCTAssertEqual(problems.count, 1)
+        XCTAssertTrue(problems.first?.contains("shape: use") == true)
+        XCTAssertEqual(Preferences.shared.displayShapes[id], stored)
+        XCTAssertEqual(DisplayShapeResolver.resolve(default: .auto, override: Preferences.shared.displayShapes[id], hasHardwareNotch: false), before)
+
+        // The same holds for a housing flag that is not a boolean at all. (A string is coerced, so
+        // "no" would be accepted as false; an object is what actually fails.)
+        let badFlag = SettingsFile.shared.apply(Data(#"{"look":{"displays":{"\#(id)":{"shape":"notch","housingGap":{}}}}}"#.utf8), isPatch: true)
+        XCTAssertEqual(badFlag.count, 1)
+        XCTAssertTrue(badFlag.first?.contains("housingGap") == true)
+        XCTAssertEqual(Preferences.shared.displayShapes[id], stored)
+
+        // The rewrite that follows cannot erase it either, since the snapshot reads the kept value.
+        XCTAssertEqual(SettingsFile.shared.snapshot().value(at: "look.displays.\(id).shape")?.string, "island")
+        XCTAssertEqual(SettingsFile.shared.snapshot().value(at: "look.displays.\(id).housingGap")?.bool, false)
+    }
+
+    func testAcceptedEntriesApplyNextToOneThatIsRejectedAndOmissionStillForgets() {
+        let kept = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
+        let accepted = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"
+        Preferences.shared.displayShapes = [kept: Preferences.DisplayShape(style: .island)]
+
+        let problems = SettingsFile.shared.apply(Data(#"{"look":{"displays":{"\#(kept)":{"shape":"nope"},"\#(accepted)":{"shape":"notch"}}}}"#.utf8), isPatch: true)
+        XCTAssertEqual(problems.count, 1)
+        XCTAssertEqual(Preferences.shared.displayShapes[kept], Preferences.DisplayShape(style: .island))
+        XCTAssertEqual(Preferences.shared.displayShapes[accepted], Preferences.DisplayShape(style: .notch))
+
+        // Removing an entry from the object still forgets that screen: only a rejected entry is kept.
+        XCTAssertEqual(SettingsFile.shared.apply(Data(#"{"look":{"displays":{"\#(accepted)":{"shape":"notch"}}}}"#.utf8), isPatch: true), [])
+        XCTAssertNil(Preferences.shared.displayShapes[kept])
+        XCTAssertEqual(Preferences.shared.displayShapes[accepted], Preferences.DisplayShape(style: .notch))
+    }
+
+    func testAnOverrideForAShownScreenNeedsNoOrphanRow() {
+        let shown = display("SHOWN", name: "Built-in")
+        let others = [shown, display("SIDE", name: "Sidecar")]
+        // SHOWN has a row of its own, so only SIDE's override needs the extra list.
+        let orphans = DisplayShapeResolver.orphanOverrides(stored: ["SHOWN"], connected: others, eligible: ["SHOWN"])
+        XCTAssertEqual(orphans, [])
+    }
+
+    func testAnOverrideForAConnectedButUnshownScreenIsListedAndNamed() {
+        let hidden = display("HIDDEN", name: "Studio Display")
+        let orphans = DisplayShapeResolver.orphanOverrides(stored: ["HIDDEN"], connected: [hidden], eligible: [])
+        XCTAssertEqual(orphans.count, 1)
+        // Named, flagged as connected, and explained: not called a disconnected display.
+        XCTAssertEqual(orphans[0].id, "HIDDEN")
+        XCTAssertEqual(orphans[0].title, "Studio Display")
+        XCTAssertTrue(orphans[0].isConnected)
+        XCTAssertTrue(orphans[0].subtitle.contains("HIDDEN"))
+        XCTAssertNotEqual(orphans[0].title, "Disconnected display")
+    }
+
+    func testAnOverrideForAnAbsentScreenStaysListedAsDisconnected() {
+        let orphans = DisplayShapeResolver.orphanOverrides(stored: ["GONE"], connected: [display("HERE", name: "Built-in")], eligible: ["HERE"])
+        XCTAssertEqual(orphans.count, 1)
+        XCTAssertEqual(orphans[0].title, "Disconnected display")
+        XCTAssertFalse(orphans[0].isConnected)
+        XCTAssertEqual(orphans[0].subtitle, "GONE")
+    }
+
+    func testAnOverrideIsNeverDroppedFromBothLists() {
+        // The bug: no display is eligible, so there are no screen rows, and filtering the stored keys
+        // against every connected screen would drop this one too. It must still be reachable.
+        let stored: Set<String> = ["ONLY"]
+        let connected = [display("ONLY", name: "Built-in")]
+        let orphans = DisplayShapeResolver.orphanOverrides(stored: stored, connected: connected, eligible: [])
+        XCTAssertEqual(orphans.map(\.id), ["ONLY"])
+        // Every stored override lands in exactly one place: this list, or a screen row.
+        for id in stored {
+            let inRows = !Set(orphans.map(\.id)).contains(id)
+            XCTAssertTrue(inRows || orphans.contains { $0.id == id })
+        }
+        // Sorted, so rows do not move between launches.
+        XCTAssertEqual(DisplayShapeResolver.orphanOverrides(stored: ["B", "A", "C"], connected: [], eligible: []).map(\.id), ["A", "B", "C"])
+    }
+
+    /// NotchDisplay needs real screens to build itself, but the members are plain values.
+    private func display(_ id: String, name: String) -> NotchDisplay {
+        NotchDisplay(id: 1, persistentID: id, name: name, frame: CGRect(x: 0, y: 0, width: 100, height: 100),
+                     builtIn: false, hasNotch: false, scale: 1)
+    }
+
     func testTheDocumentedSettingsExampleApplies() {
         let example = Data(#"{"look":{"shape":"auto","displays":{"37D8832A-2D66-02CA-B9F7-8F30A301B230":{"shape":"notch","housingGap":false}}}}"#.utf8)
         XCTAssertEqual(SettingsFile.shared.apply(example, isPatch: true), [])

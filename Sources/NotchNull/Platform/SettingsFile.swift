@@ -145,26 +145,34 @@ final class SettingsFile: ObservableObject {
                 }
                 var shapes: [String: Preferences.DisplayShape] = [:]
                 var problems: [String] = []
+                let stored = preferences.displayShapes
+                // A rejected entry keeps whatever that screen already had, so a typo never discards a
+                // stored override. An entry that is simply absent is not merged back, so removing one
+                // from the file still forgets it.
+                func reject(_ uuid: UUID?, _ message: String) {
+                    problems.append(message)
+                    if let uuid, let previous = stored[uuid.uuidString] { shapes[uuid.uuidString] = previous }
+                }
                 for (id, entry) in entries {
                     guard let uuid = UUID(uuidString: id) else {
-                        problems.append("\"\(id)\" is not a display UUID.")
+                        reject(nil, "\"\(id)\" is not a display UUID.")
                         continue
                     }
                     guard let fields = entry.object else {
-                        problems.append("\(id): should be an object with shape and housingGap.")
+                        reject(uuid, "\(id): should be an object with shape and housingGap.")
                         continue
                     }
                     for key in fields.keys where key != "shape" && key != "housingGap" {
                         problems.append("\(id): unknown key \(key).")
                     }
                     guard let raw = fields["shape"]?.string, let style = Preferences.ShapeStyle(rawValue: raw) else {
-                        problems.append("\(id).shape: use \"auto\", \"notch\" or \"island\".")
+                        reject(uuid, "\(id).shape: use \"auto\", \"notch\" or \"island\".")
                         continue
                     }
                     var housingGap = true
-                    if let stored = fields["housingGap"] {
-                        guard let flag = stored.bool else {
-                            problems.append("\(id).housingGap: use true or false.")
+                    if let rawFlag = fields["housingGap"] {
+                        guard let flag = rawFlag.bool else {
+                            reject(uuid, "\(id).housingGap: use true or false.")
                             continue
                         }
                         housingGap = flag

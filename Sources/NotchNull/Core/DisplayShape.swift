@@ -11,6 +11,25 @@ struct DisplayPresentation: Equatable {
     var spansMiddle: Bool { island || !housingGap }
 }
 
+/// One stored override that the per-screen rows do not already cover: a screen that is connected
+/// but gets no panel in the current display mode, or one that is not connected at all.
+struct OrphanOverride: Identifiable, Equatable {
+    /// The display's persistent identifier, which is what the override is keyed by.
+    let id: String
+    /// The connected screen with this identifier, when there is one.
+    let display: NotchDisplay?
+
+    var isConnected: Bool { display != nil }
+
+    /// Named when the screen is here, so the reader can tell the two cases apart.
+    var title: String { display?.name ?? "Disconnected display" }
+
+    /// The identifier, and why this row exists when the screen is connected.
+    var subtitle: String {
+        display == nil ? id : "\(id) · connected, but this display mode gives it no panel"
+    }
+}
+
 /// Combines the global shape default with a display's own override.
 enum DisplayShapeResolver {
     static func resolve(
@@ -23,6 +42,21 @@ enum DisplayShapeResolver {
         // Nothing may be drawn over a camera housing that is really there.
         let housingGap = hasHardwareNotch || (override?.housingGap ?? true)
         return DisplayPresentation(island: island, housingGap: housingGap)
+    }
+
+    /// Every stored override that has no row of its own, so it can still be forgotten. The rows come
+    /// from `eligible`; an override whose screen is connected but not eligible would otherwise be
+    /// unreachable, since filtering against every connected screen drops it from the other list too.
+    /// Takes identifiers rather than displays so the rule can be tested without real screens.
+    static func orphanOverrides(
+        stored: Set<String>,
+        connected: [NotchDisplay],
+        eligible: Set<String>
+    ) -> [OrphanOverride] {
+        stored
+            .filter { !eligible.contains($0) }
+            .sorted()
+            .map { id in OrphanOverride(id: id, display: connected.first { $0.persistentID == id }) }
     }
 
     /// The one-line description of a screen's shape row: its size, the choice it stores, then only

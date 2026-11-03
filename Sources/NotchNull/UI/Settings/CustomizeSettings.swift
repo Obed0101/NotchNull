@@ -34,10 +34,14 @@ struct StyleSettings: View {
         DisplaySelection.eligible(displays, mode: preferences.displayMode, selected: preferences.selectedDisplays)
     }
 
-    /// Overrides saved for screens that are not connected right now.
-    private var disconnectedOverrides: [String] {
-        let connected = Set(displays.map(\.persistentID))
-        return preferences.displayShapes.keys.filter { !connected.contains($0) }.sorted()
+    /// Overrides saved for screens that get no row of their own: connected but not shown in the
+    /// current display mode, or not connected at all. Both stay reachable so they can be forgotten.
+    private var orphanOverrides: [OrphanOverride] {
+        DisplayShapeResolver.orphanOverrides(
+            stored: Set(preferences.displayShapes.keys),
+            connected: displays,
+            eligible: Set(eligibleDisplays.map(\.persistentID))
+        )
     }
 
     /// Per-screen rows matter once screens can differ, once one is overridden, or when a screen
@@ -145,9 +149,11 @@ struct StyleSettings: View {
                         .transition(.opacity.combined(with: .offset(y: -4)))
                     }
                 }
-                ForEach(disconnectedOverrides, id: \.self) { id in
-                    SettingsRow(title: "Disconnected display", subtitle: id, symbol: "display.slash", tint: Theme.Accent.warning) {
-                        Button("Forget") { preferences.displayShapes[id] = nil }
+                ForEach(orphanOverrides) { orphan in
+                    SettingsRow(title: orphan.title, subtitle: orphan.subtitle,
+                        symbol: orphan.isConnected ? "display" : "display.slash",
+                        tint: orphan.isConnected ? Theme.Accent.system : Theme.Accent.warning) {
+                        Button("Forget") { preferences.displayShapes[orphan.id] = nil }
                     }
                 }
             }
