@@ -88,7 +88,7 @@ final class Preferences: ObservableObject {
     }
 
     /// Where the body lives: morphing out of the hardware notch, or floating as an island.
-    enum ShapeStyle: String, CaseIterable, Identifiable {
+    enum ShapeStyle: String, Codable, CaseIterable, Identifiable {
         case auto, notch, island
         var id: String { rawValue }
         var title: String {
@@ -98,6 +98,14 @@ final class Preferences: ObservableObject {
             case .island: "Island"
             }
         }
+    }
+
+    /// One display's own presentation, stored by display UUID. A display without an entry follows
+    /// the global `shapeStyle` and assumes a camera housing.
+    struct DisplayShape: Codable, Equatable {
+        var style: ShapeStyle
+        /// The notch style leaves room for a camera housing. Always true on a screen that has one.
+        var housingGap = true
     }
 
     /// What the idle island shows.
@@ -169,6 +177,8 @@ final class Preferences: ObservableObject {
     /// Automatic floats an island on screens without a hardware notch (including a MacBook set
     /// to a resolution that leaves the notch area out) and uses the notch everywhere else.
     @Published var shapeStyle: ShapeStyle { didSet { defaults.set(shapeStyle.rawValue, forKey: Keys.shapeStyle) } }
+    /// Per-display shape overrides, keyed by the display's persistent UUID. Missing means Default.
+    @Published var displayShapes: [String: DisplayShape] { didSet { saveDisplayShapes() } }
     @Published var pillContent: PillContent { didSet { defaults.set(pillContent.rawValue, forKey: Keys.pillContent) } }
     @Published var agentMarkMotion: AgentMarkMotion { didSet { defaults.set(agentMarkMotion.rawValue, forKey: Keys.agentMarkMotion) } }
     @Published var use24Hour: Bool { didSet { save(use24Hour, Keys.use24Hour) } }
@@ -290,6 +300,7 @@ final class Preferences: ObservableObject {
         static let setupCompleted = "setupCompleted", appliedPreset = "appliedPreset"
         static let keychainAllowed = "keychainAllowed", bluetoothAllowed = "bluetoothAllowed"
         static let shapeStyle = "shapeStyle", pillContent = "pillContent", use24Hour = "use24Hour"
+        static let displayShapes = "displayShapes"
         static let agentMarkMotion = "agentMarkMotion"
         static let islandSatellites = "islandSatellites", islandWidth = "islandWidth", islandHeight = "islandHeight", islandTop = "islandTop"
     }
@@ -345,6 +356,7 @@ final class Preferences: ObservableObject {
         glowNeedsYou = defaults.bool(forKey: Keys.glowNeedsYou)
         hideNotch = defaults.bool(forKey: Keys.hideNotch)
         shapeStyle = ShapeStyle(rawValue: defaults.string(forKey: Keys.shapeStyle) ?? "") ?? .auto
+        displayShapes = Self.decodeDisplayShapes(defaults.data(forKey: Keys.displayShapes))
         pillContent = PillContent(rawValue: defaults.string(forKey: Keys.pillContent) ?? "") ?? .clock
         agentMarkMotion = AgentMarkMotion(rawValue: defaults.string(forKey: Keys.agentMarkMotion) ?? "") ?? .still
         use24Hour = defaults.bool(forKey: Keys.use24Hour)
@@ -443,6 +455,17 @@ final class Preferences: ObservableObject {
 
     private func save(_ value: Bool, _ key: String) {
         defaults.set(value, forKey: key)
+    }
+
+    private func saveDisplayShapes() {
+        guard let data = try? JSONEncoder().encode(displayShapes) else { return }
+        defaults.set(data, forKey: Keys.displayShapes)
+    }
+
+    /// Missing or unreadable stored overrides mean every display follows the global default.
+    nonisolated static func decodeDisplayShapes(_ data: Data?) -> [String: DisplayShape] {
+        guard let data, let shapes = try? JSONDecoder().decode([String: DisplayShape].self, from: data) else { return [:] }
+        return shapes
     }
 
     // MARK: Derived
@@ -544,16 +567,18 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// Preferences the "Reset look, size and motion" button clears.
+    static let customizationKeys: [String] = [
+        Keys.bodyStyle, Keys.tintHex, Keys.accentHex, Keys.accentFollowsSystem, Keys.bodyOpacity, Keys.panelWidth, Keys.panelHeight,
+        Keys.closedExtraWidth, Keys.activityWidthScale, Keys.cornerScale, Keys.shadow, Keys.animationSpeed,
+        Keys.bounce, Keys.hoverDelay, Keys.closeDelay, Keys.staggerContent, Keys.emissionIntensity,
+        Keys.tabOrder, Keys.hiddenTabs, Keys.disabledActivities, Keys.homeRows, Keys.hiddenHomeWidgets,
+        Keys.shapeStyle, Keys.displayShapes, Keys.pillContent, Keys.islandSatellites, Keys.islandWidth, Keys.islandHeight, Keys.islandTop,
+    ]
+
     /// Restores look, size, motion and composition settings (feature switches are kept).
     func resetCustomization() {
-        let keys = [
-            Keys.bodyStyle, Keys.tintHex, Keys.accentHex, Keys.accentFollowsSystem, Keys.bodyOpacity, Keys.panelWidth, Keys.panelHeight,
-            Keys.closedExtraWidth, Keys.activityWidthScale, Keys.cornerScale, Keys.shadow, Keys.animationSpeed,
-            Keys.bounce, Keys.hoverDelay, Keys.closeDelay, Keys.staggerContent, Keys.emissionIntensity,
-            Keys.tabOrder, Keys.hiddenTabs, Keys.disabledActivities, Keys.homeRows, Keys.hiddenHomeWidgets,
-            Keys.shapeStyle, Keys.pillContent, Keys.islandSatellites, Keys.islandWidth, Keys.islandHeight, Keys.islandTop,
-        ]
-        keys.forEach(defaults.removeObject(forKey:))
+        Self.customizationKeys.forEach(defaults.removeObject(forKey:))
         withAnimation(Motion.state) {
             bodyStyle = .black
             tintHex = defaults.integer(forKey: Keys.tintHex)
@@ -578,6 +603,7 @@ final class Preferences: ObservableObject {
             homeRows = Self.defaultHomeRows.map(\.rawValue)
             hiddenHomeWidgets = []
             shapeStyle = .auto
+            displayShapes = [:]
             pillContent = .clock
             islandSatellites = defaults.bool(forKey: Keys.islandSatellites)
             islandWidth = defaults.double(forKey: Keys.islandWidth)

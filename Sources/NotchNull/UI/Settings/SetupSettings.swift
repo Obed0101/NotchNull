@@ -24,7 +24,11 @@ struct SetupSettings: View {
             HStack(spacing: 8) {
                 ForEach(Preferences.ShapeStyle.allCases) { style in
                     ShapeCard(style: style, selected: preferences.shapeStyle == style) {
-                        withAnimation(Motion.state) { preferences.shapeStyle = style }
+                        withAnimation(Motion.state) {
+                            preferences.shapeStyle = style
+                            // A starting shape applies to every screen.
+                            preferences.displayShapes = [:]
+                        }
                         preferences.setupCompleted = true
                     }
                 }

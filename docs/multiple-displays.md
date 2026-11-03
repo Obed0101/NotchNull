@@ -13,6 +13,57 @@ notch. The clipboard shortcut and open/close commands target the enabled display
 under the pointer, falling back to built-in, then main/first eligible display.
 Fullscreen-hidden displays are excluded from shortcut targeting.
 
+## Per-display shape
+
+Settings › Style › Shape picks a default for every screen (Automatic, Notch or
+Island) and lists each screen so it can keep its own choice: Default, Notch or
+Island. Default stores nothing and follows the global picker; choosing Default
+again forgets that screen's entry. Overrides are keyed by display UUID, so they
+survive reconnects, restarts and display-number changes. An override for a screen
+that is not connected is kept and can be forgotten from the same list, and so is one
+for a screen that is connected but gets no panel in the current display mode (for
+example Selected displays with that screen left out): that row is titled with the
+screen's name, so it is not mistaken for a disconnected one.
+
+Automatic resolves per screen: a display showing a hardware notch uses the notch,
+any other display floats an island. A MacBook that changes to a resolution
+without the notch re-resolves without user action.
+
+## Camera housing
+
+The notch style normally reserves the middle for the camera housing: activity
+wings, OSDs and the open panel's header stay clear of it. On a screen without a
+hardware notch, the Shape page also offers "Assume a camera housing" for that
+screen. With it off, an OSD such as the volume HUD becomes one row across the
+middle, the open panel's header uses the full width, and the closed body still
+draws the same black pill. A screen that really has a hardware notch always keeps
+the housing, whatever is stored.
+
+`look.displays` in settings.json holds the overrides, and `status` reports each
+display's resolved shape and whether it assumes a housing:
+
+```json
+"look": {
+  "shape": "auto",
+  "displays": {
+    "37D8832A-2D66-02CA-B9F7-8F30A301B230": { "shape": "notch", "housingGap": false }
+  }
+}
+```
+
+An entry needs a valid display UUID and one of `auto`, `notch` or `island`.
+A screen's own `auto` follows that screen's hardware (an island where there is no
+notch, the notch body where there is one), while `Default` in Settings stores
+nothing and follows the global `look.shape` picker. All four choices are offered in
+the per-screen menu, so a value written here is always visible and can be changed
+back.
+`housingGap` defaults to true. A syntactically valid UUID for a screen that is not
+connected is kept; an invalid entry is reported and does not stop the others. An
+entry that fails validation leaves that screen's stored override alone, so a typo
+never changes or removes a shape; delete the entry instead to forget it.
+Applying a shape card in Setup, or "Reset look, size and motion", clears every
+override.
+
 `notchnull status` reports connected displays (names, UUIDs, scale, logical size)
 and panel display IDs, global frames, shapes, and Window Server visibility.
 `behavior.selectedDisplays` in settings.json holds selected UUIDs; set

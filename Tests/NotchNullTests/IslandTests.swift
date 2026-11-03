@@ -15,8 +15,10 @@ final class IslandTests: XCTestCase {
             "shape": preferences.shapeStyle, "height": preferences.islandHeight, "width": preferences.islandWidth,
             "top": preferences.islandTop, "satellites": preferences.islandSatellites, "content": preferences.pillContent,
             "panelWidth": preferences.panelWidth, "panelHeight": preferences.panelHeight,
+            "shapes": preferences.displayShapes,
         ]
         preferences.shapeStyle = .auto
+        preferences.displayShapes = [:]
         preferences.islandHeight = 0
         preferences.islandWidth = 0
         preferences.islandTop = 2
@@ -34,6 +36,7 @@ final class IslandTests: XCTestCase {
         preferences.pillContent = saved["content"] as? Preferences.PillContent ?? .clock
         preferences.panelWidth = saved["panelWidth"] as? Double ?? 500
         preferences.panelHeight = saved["panelHeight"] as? Double ?? 148
+        preferences.displayShapes = saved["shapes"] as? [String: Preferences.DisplayShape] ?? [:]
     }
 
     private func model(_ geometry: NotchGeometry, phase: NotchViewModel.Phase = .closed) -> NotchViewModel {

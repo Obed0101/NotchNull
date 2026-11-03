@@ -35,7 +35,7 @@ final class NotchWindowController {
 
     init(screen: NSScreen, services: AppServices, model: NotchViewModel? = nil, onWindowFailure: (() -> Void)? = nil) {
         let geometry = NotchGeometry(screen: screen)
-        self.model = model ?? NotchViewModel(geometry: geometry)
+        self.model = model ?? NotchViewModel(geometry: geometry, displayID: NotchDisplay.persistentID(for: screen))
         self.onWindowFailure = onWindowFailure
         panel = NotchPanel(frame: geometry.windowFrame)
         clipboard = services.clipboard
