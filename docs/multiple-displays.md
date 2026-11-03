@@ -49,6 +49,11 @@ display's resolved shape and whether it assumes a housing:
 ```
 
 An entry needs a valid display UUID and one of `auto`, `notch` or `island`.
+A screen's own `auto` follows that screen's hardware (an island where there is no
+notch, the notch body where there is one), while `Default` in Settings stores
+nothing and follows the global `look.shape` picker. All four choices are offered in
+the per-screen menu, so a value written here is always visible and can be changed
+back.
 `housingGap` defaults to true. A syntactically valid UUID for a screen that is not
 connected is kept; an invalid entry is reported and does not stop the others.
 Applying a shape card in Setup, or "Reset look, size and motion", clears every

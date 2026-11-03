@@ -65,16 +65,16 @@ struct StyleSettings: View {
     }
 
     private func screenSubtitle(_ display: NotchDisplay) -> String {
-        let size = "\(Int(display.frame.width)) × \(Int(display.frame.height)) pt"
-        let effective: String
-        if resolvedIsland(display) {
-            effective = "Island"
-        } else if !display.hasNotch, preferences.displayShapes[display.persistentID]?.housingGap == false {
-            effective = "Notch, no camera housing"
-        } else {
-            effective = "Notch"
-        }
-        return "\(size) · \(effective)"
+        DisplayShapeResolver.subtitle(
+            size: "\(Int(display.frame.width)) × \(Int(display.frame.height)) pt",
+            stored: preferences.displayShapes[display.persistentID]?.style,
+            presentation: DisplayShapeResolver.resolve(
+                default: preferences.shapeStyle,
+                override: preferences.displayShapes[display.persistentID],
+                hasHardwareNotch: display.hasNotch
+            ),
+            hasHardwareNotch: display.hasNotch
+        )
     }
 
     /// Nil means Default: the screen follows the global shape and stores no entry.
@@ -125,12 +125,14 @@ struct StyleSettings: View {
                         symbol: display.builtIn ? "laptopcomputer" : "display", tint: Theme.Accent.system) {
                         Picker("", selection: shapeBinding(for: display).animation(Motion.state)) {
                             Text("Default").tag(Preferences.ShapeStyle?.none)
-                            ForEach([Preferences.ShapeStyle.notch, .island]) { style in
+                            // Every value `look.displays` accepts needs a tag, or a stored override
+                            // selects nothing and the control renders blank.
+                            ForEach(Preferences.ShapeStyle.allCases) { style in
                                 Text(style.title).tag(Optional(style))
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 130)
+                        .frame(width: 170)
                     }
                     if !display.hasNotch, resolvedStyle(display) == .notch {
                         SettingsToggle(

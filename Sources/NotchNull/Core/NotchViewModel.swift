@@ -140,6 +140,21 @@ final class NotchViewModel: ObservableObject {
     /// Room kept in the middle of the panel header, for the same reason.
     var headerGap: CGFloat { spansMiddle ? 8 : notchSize.width + 8 }
 
+    /// Width a one-row OSD keeps while the body animates, or nil when it should fill the body.
+    /// The island pins the HUD's own width so an exit only clips and fades it instead of re-laying
+    /// out the bar on every frame; the notch already sizes its spanning row from the body.
+    var osdRowWidth: CGFloat? {
+        guard isIsland else { return nil }
+        return min(Self.osdWidth(scale: CGFloat(preferences.activityWidthScale)), Self.maxBodyWidth)
+    }
+
+    /// The volume/brightness HUD width before scaling, shared with the island's own layout.
+    static let osdWidthBase: CGFloat = 196
+    static func osdWidth(scale: CGFloat) -> CGFloat { osdWidthBase * scale }
+
+    /// Widest body the fixed canvas holds for a shape without side flares.
+    static var maxBodyWidth: CGFloat { Theme.Size.canvas.width - 40 }
+
     /// Height of the open panel's header. The notch's header is the notch row; the island's is a
     /// little taller so the tabs clear its rounded top corners.
     var headerHeight: CGFloat { isIsland ? max(rowHeight, 30) + 8 : notchSize.height }

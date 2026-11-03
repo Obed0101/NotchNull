@@ -102,6 +102,16 @@ enum SnapshotRenderer {
             ("84-nohousing-open-home", .open, .home),
         ]
         render(noHousing, geometry: islandGeometry, services: services, to: directory, displayID: noHousingID)
+        // The same OSD on a wider island: the row keeps the HUD's own 196 pt (scaled) and is centred
+        // in the body, while 181-nohousing-volume at the same width lets its row fill edge to edge.
+        let savedScale = preferences.activityWidthScale
+        let savedIslandWidth = preferences.islandWidth
+        preferences.activityWidthScale = 1.4
+        preferences.islandWidth = 420
+        render([("180-island-volume-wide", .activity(.volume), .home)], geometry: islandGeometry, services: services, to: directory)
+        render([("181-nohousing-volume-wide", .activity(.volume), .home)], geometry: islandGeometry, services: services, to: directory, displayID: noHousingID)
+        preferences.activityWidthScale = savedScale
+        preferences.islandWidth = savedIslandWidth
         // The same two HUDs with the housing assumed, to compare their footprint.
         preferences.displayShapes[noHousingID] = Preferences.DisplayShape(style: .notch)
         render([
@@ -144,10 +154,13 @@ enum SnapshotRenderer {
         preferences.shapeStyle = .auto
         preferences.displayShapes = [:]
         renderSettingsPage("82-settings-style", services: services, to: directory) { StyleSettings() }
-        // The same page with the notch chosen, where the housing option appears per screen, plus an
-        // override saved for a screen that is not connected.
+        // The same page with the notch chosen, where the housing option appears per screen, a screen's
+        // own Automatic saved (it must render as Automatic, not as a blank control), and an override
+        // kept for a screen that is not connected.
         preferences.shapeStyle = .notch
-        preferences.displayShapes = ["DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD": .init(style: .island)]
+        var pageOverrides: [String: Preferences.DisplayShape] = ["DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD": .init(style: .island)]
+        if let first = NotchDisplay.connected.first { pageOverrides[first.persistentID] = .init(style: .auto) }
+        preferences.displayShapes = pageOverrides
         renderSettingsPage("89-settings-style-notch", services: services, to: directory) { StyleSettings() }
         preferences.displayMode = pageMode
         preferences.shapeStyle = pageShape

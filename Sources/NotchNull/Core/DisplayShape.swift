@@ -24,4 +24,23 @@ enum DisplayShapeResolver {
         let housingGap = hasHardwareNotch || (override?.housingGap ?? true)
         return DisplayPresentation(island: island, housingGap: housingGap)
     }
+
+    /// The one-line description of a screen's shape row: its size, the choice it stores, then only
+    /// the parts that choice does not already name. Default and Automatic leave the body unnamed, so
+    /// the resolved body is added; an explicit Notch or Island is not repeated back at the reader.
+    static func subtitle(
+        size: String,
+        stored: Preferences.ShapeStyle?,
+        presentation: DisplayPresentation,
+        hasHardwareNotch: Bool
+    ) -> String {
+        var parts = [size, stored?.title ?? "Default"]
+        if stored == nil || stored == .auto {
+            parts.append(presentation.island ? "Island" : "Notch")
+        }
+        if !presentation.island, !hasHardwareNotch, !presentation.housingGap {
+            parts.append("no camera housing")
+        }
+        return parts.joined(separator: " · ")
+    }
 }

@@ -20,12 +20,7 @@ struct MusicActivity: View {
 struct LevelActivity: View {
     @EnvironmentObject private var levels: LevelsService
     @EnvironmentObject private var model: NotchViewModel
-    @EnvironmentObject private var preferences: Preferences
     @Environment(\.wingContext) private var context
-
-    private var spanningRowWidth: CGFloat {
-        (ActivityKind.volume.layout.islandWidth ?? 196) * CGFloat(preferences.activityWidthScale)
-    }
 
     var body: some View {
         let level = levels.level
@@ -34,9 +29,10 @@ struct LevelActivity: View {
         // fill, never the notch.
         Group {
             if model.spansMiddle {
-                // Nothing sits in the middle, so the bar runs the whole row. The row keeps the
-                // HUD's own width while the body shrinks away, so the exit only clips and fades
-                // it instead of re-laying out the bar on every frame.
+                // Nothing sits in the middle, so the bar runs the whole row. On the island the row
+                // keeps the HUD's own width while the body shrinks away, so the exit only clips and
+                // fades it instead of re-laying out the bar on every frame. The notch instead lets
+                // the row fill the body it already sizes around its content.
                 HStack(spacing: 8) {
                     icon(level, tint: tint)
                     LevelBar(value: level.muted ? 0 : Double(level.value), tint: tint)
@@ -45,7 +41,8 @@ struct LevelActivity: View {
                     value(level)
                 }
                 .padding(.horizontal, context.horizontalPadding)
-                .frame(maxWidth: model.isIsland ? spanningRowWidth : .infinity)
+                .frame(width: model.osdRowWidth)
+                .frame(maxWidth: model.osdRowWidth == nil ? .infinity : nil)
                 .frame(height: context.rowHeight)
                 .condense(delay: Motion.stagger(1))
             } else {
