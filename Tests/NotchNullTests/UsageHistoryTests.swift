@@ -82,11 +82,27 @@ final class UsageHistoryTests: XCTestCase {
         let cells = DayPaceBar.layout(pace: pace, days: days, percent: 30)
         var drawn = 0.0
         for case .day(let day) in cells.prefix(3) { drawn += day.used }
-        for case .earlier(let fill) in cells { drawn += fill * 100 / 7 }
+        for case .earlier(let amount, _) in cells { drawn += amount }
         XCTAssertEqual(drawn, 30, accuracy: 0.001)
         XCTAssertEqual(cells[0], .day(days[0]))
         XCTAssertEqual(cells[3], .day(days[2]))
         XCTAssertEqual(cells[4], .empty)
+    }
+
+    func testOverspendOnAnIncompleteDayStaysAmberAndNoUsageIsDropped() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        let now = start.addingTimeInterval(86_400 + 6 * 3600)
+        let pace = try XCTUnwrap(window(20, reset: reset).dayPace(at: now))
+        // 20% recorded late on day 1, then the Mac slept into day 2 with the counter still at 20%.
+        let first = CycleDay(day: 0, start: start, since: start, baseline: 0, latest: 20,
+                             allowance: 100.0 / 7, complete: false)
+        let second = CycleDay(day: 1, start: pace.dayStart, since: now, baseline: 20, latest: 20,
+                              allowance: 80.0 / 6)
+        let cells = DayPaceBar.layout(pace: pace, days: [first, second], percent: 20)
+        XCTAssertEqual(cells[0], .earlier(amount: 20, allowance: 100.0 / 7))
+        XCTAssertTrue(cells[0].over)
+        XCTAssertEqual(cells[0].fraction, 1)
+        XCTAssertEqual(cells[1], .day(second))
     }
 
     func testOverspendingIsFlaggedAndNewCycleClearsDays() throws {
