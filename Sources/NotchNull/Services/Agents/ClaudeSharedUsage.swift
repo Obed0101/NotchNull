@@ -47,7 +47,11 @@ enum ClaudeSharedUsage {
         let readings = ["5h", "7d"].compactMap { selected[$0] }
         guard let oldest = readings.map(\.observed).min() else { return unavailable() }
         let stale = now.timeIntervalSince(oldest) > 20 * 60
-        return ProviderUsage(provider: .claude, windows: readings.map(\.window), updatedAt: oldest,
+        let plan = (object["plan"] as? String).flatMap { raw -> String? in
+            let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : ClaudeUsageService.planName(value)
+        }
+        return ProviderUsage(provider: .claude, plan: plan, windows: readings.map(\.window), updatedAt: oldest,
                              state: stale ? .unavailable("Last known MendCode limits · awaiting refresh") : .ready)
     }
 }

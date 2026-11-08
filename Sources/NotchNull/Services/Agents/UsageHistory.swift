@@ -16,14 +16,18 @@ struct UsageHistory: Codable, Equatable {
     var last: Reading?
     var intervals: [Interval] = []
     var interrupted: Bool? = nil
+    /// Days of the current cycle, counted from its reset time rather than local midnight.
+    var cycleReset: Date? = nil
+    var cycleDays: [CycleDay]? = nil
 
     mutating func record(_ window: UsageWindow, at date: Date, now: Date) -> Bool {
         guard let reset = window.resetsAt, let duration = window.duration,
               duration >= 86_400, duration <= 35 * 86_400,
-              window.percent.isFinite, date <= now, now.timeIntervalSince(date) <= 1200,
+              window.percent.isFinite, (0...100).contains(window.percent), date <= now, now.timeIntervalSince(date) <= 1200,
               reset > date, reset.timeIntervalSince(date) <= duration + 60,
               last.map({ date > $0.date }) ?? true else { return false }
         let reading = Reading(date: date, percent: window.percent, reset: reset, duration: duration)
+        recordDay(window, at: date, previous: interrupted == true ? nil : last)
         if let previous = last {
             if previous.duration != duration { intervals = [] }
             // Never spread a long offline gap across presumed working hours or bridge a reset.
@@ -56,6 +60,49 @@ struct UsageHistory: Codable, Equatable {
         let cutoff = now.addingTimeInterval(-28 * 86_400)
         // Drop whole overlapping intervals rather than retain observations older than the cutoff.
         intervals.removeAll { $0.start < cutoff }
+    }
+
+    /// Today's consumption needs the counter at the start of the cycle day. Day 1 starts at zero by
+    /// definition; later days use a reading taken shortly before the boundary, or else start at the
+    /// first observation and say so, instead of inventing usage while the Mac was off.
+    private mutating func recordDay(_ window: UsageWindow, at date: Date, previous: Reading?) {
+        guard let reset = window.resetsAt, let pace = window.dayPace(at: date) else { return }
+        if cycleReset.map({ abs($0.timeIntervalSince(reset)) >= 60 }) ?? true {
+            cycleReset = reset
+            cycleDays = []
+        }
+        var days = cycleDays ?? []
+        if let index = days.indices.last, days[index].day == pace.day, window.percent >= days[index].latest {
+            days[index].latest = window.percent
+            cycleDays = days
+            return
+        }
+        // A lower counter on the same day is a correction: keep only what can still be trusted.
+        if let current = days.last, current.day >= pace.day { days.removeAll { $0.day >= pace.day } }
+        let baseline: Double
+        let since: Date
+        if pace.day == 0 {
+            (baseline, since) = (0, pace.dayStart)
+        } else if let previous, abs(previous.reset.timeIntervalSince(reset)) < 60,
+                  previous.date <= pace.dayStart, pace.dayStart.timeIntervalSince(previous.date) <= 1200,
+                  window.percent >= previous.percent {
+            (baseline, since) = (previous.percent, pace.dayStart)
+        } else {
+            (baseline, since) = (window.percent, date)
+        }
+        if let index = days.indices.last, days[index].day == pace.day - 1 {
+            days[index].complete = since == pace.dayStart
+        }
+        let allowance = max(0, 100 - baseline) / Double(pace.days - pace.day)
+        days.append(CycleDay(day: pace.day, start: pace.dayStart, since: since,
+                             baseline: baseline, latest: window.percent, allowance: allowance))
+        cycleDays = days
+    }
+
+    /// Recorded days of the window's current cycle, oldest first.
+    func days(for window: UsageWindow) -> [CycleDay] {
+        guard let reset = window.resetsAt, let cycleReset, abs(cycleReset.timeIntervalSince(reset)) < 60 else { return [] }
+        return cycleDays ?? []
     }
 
     /// Each local hour needs three hours of actual observations on at least three dates.
@@ -121,6 +168,46 @@ extension UsageWindow {
               reset.timeIntervalSince(now) <= duration + 60 else { return nil }
         return (100 - percent) / max(1, reset.timeIntervalSince(now) / 86_400)
     }
+
+    /// The cycle split into equal days counted from the reset, so each day's share is fixed
+    /// for the whole day. Needs only the current reading, never a reconstructed history.
+    func dayPace(at now: Date) -> DayPace? {
+        guard let duration, duration >= 2 * 86_400, let elapsed = elapsedFraction(at: now),
+              let reset = resetsAt, reset > now, reset.timeIntervalSince(now) <= duration + 60 else { return nil }
+        let days = Int((duration / 86_400).rounded())
+        let day = min(days - 1, Int(elapsed * Double(days)))
+        let length = duration / Double(days)
+        let dayEnd = reset.addingTimeInterval(-length * Double(days - day - 1))
+        return DayPace(day: day, days: days, dayStart: dayEnd.addingTimeInterval(-length), dayEnd: dayEnd)
+    }
+}
+
+/// Where `now` falls in the cycle: day 1 begins at the reset time, not at midnight.
+struct DayPace: Equatable {
+    let day: Int
+    let days: Int
+    let dayStart: Date
+    let dayEnd: Date
+}
+
+/// One cycle day's consumption against an allowance fixed when the day began.
+struct CycleDay: Codable, Equatable {
+    var day: Int
+    var start: Date
+    /// Equals `start` when the counter at the boundary is known; otherwise the first observation.
+    var since: Date
+    var baseline: Double
+    var latest: Double
+    /// Quota left at the start of the day divided by the days left, so savings and overspending
+    /// carry into later days. Fixed for the whole day.
+    var allowance: Double
+    /// Whether the next day began with a known boundary, so this day's total is exact.
+    var complete: Bool? = nil
+
+    var used: Double { latest - baseline }
+    var exact: Bool { since == start }
+    var fraction: Double { allowance > 0 ? min(1, used / allowance) : (used > 0 ? 1 : 0) }
+    var over: Bool { used > allowance + 0.05 }
 }
 
 @MainActor
@@ -130,6 +217,30 @@ final class UsageHistoryStore {
     private let writer = DispatchQueue(label: "NotchNull.usage-history", qos: .utility)
     private var cleanupTimer: Timer?
     private let scheduleCleanup: Bool
+    private var active = false
+
+    var isCleanupScheduled: Bool { cleanupTimer != nil }
+
+    func setActive(_ active: Bool, now: Date = Date()) {
+        self.active = active
+        if active { cleanup(at: now) }
+        updateCleanupTimer()
+    }
+
+    func interrupt(provider: String) {
+        record(provider: provider, plan: nil, windows: [], updatedAt: nil, state: .loading)
+    }
+
+    func interruptMissingPlans(present: Set<String>) {
+        let agentProviders: Set<String> = ["claude", "codex", "opencode"]
+        for key in Array(histories.keys) {
+            guard let data = key.data(using: .utf8),
+                  let parts = try? JSONDecoder().decode([String].self, from: data),
+                  let provider = parts.first,
+                  !agentProviders.contains(provider), !present.contains(provider) else { continue }
+            interrupt(provider: provider)
+        }
+    }
 
     init(url: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
         .appendingPathComponent("NotchNull/usage-history.json"), now: Date = Date(), scheduleCleanup: Bool = true) {
@@ -144,7 +255,7 @@ final class UsageHistoryStore {
     }
 
     private func updateCleanupTimer() {
-        if histories.isEmpty {
+        if histories.isEmpty || !active {
             cleanupTimer?.invalidate()
             cleanupTimer = nil
         } else if scheduleCleanup && cleanupTimer == nil {
@@ -217,5 +328,9 @@ final class UsageHistoryStore {
 
     func forecast(provider: String, plan: String?, window: UsageWindow, at now: Date) -> UsageForecast? {
         histories[Self.key(provider: provider, plan: plan, window: window)]?.forecast(window, at: now)
+    }
+
+    func days(provider: String, plan: String?, window: UsageWindow) -> [CycleDay] {
+        histories[Self.key(provider: provider, plan: plan, window: window)]?.days(for: window) ?? []
     }
 }

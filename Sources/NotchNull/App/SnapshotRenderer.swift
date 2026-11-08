@@ -26,6 +26,7 @@ enum SnapshotRenderer {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let services = AppServices()
         seed(services)
+        renderDailyCells(to: directory)
         let geometry = NotchGeometry(
             screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
             notchSize: CGSize(width: 185, height: 32),
@@ -203,6 +204,32 @@ enum SnapshotRenderer {
         }
         let count: Int = [states.count, medium.count, large.count, wideClosed.count, island.count, 16].reduce(0, +)
         print("Rendered \(count) snapshots to \(directory.path)")
+    }
+
+    private static func renderDailyCells(to directory: URL) {
+        let now = Date()
+        let pace = DayPace(day: 2, days: 7, dayStart: now.addingTimeInterval(-3 * 3600), dayEnd: now.addingTimeInterval(21 * 3600))
+        func day(_ index: Int, used: Double, allowance: Double, exact: Bool = true) -> CycleDay {
+            let start = pace.dayStart.addingTimeInterval(Double(index - 2) * 86_400)
+            return CycleDay(day: index, start: start, since: exact ? start : start.addingTimeInterval(3600),
+                            baseline: 0, latest: used, allowance: allowance, complete: index < 2 ? true : nil)
+        }
+        let saving = [day(0, used: 9, allowance: 14.3), day(1, used: 4, allowance: 15.2), day(2, used: 3, allowance: 17.4)]
+        let over = [day(0, used: 20, allowance: 14.3), day(2, used: 18, allowance: 13.3, exact: false)]
+        let view = VStack(alignment: .leading, spacing: 14) {
+            DayPaceBar(pace: pace, days: saving, percent: 16, tint: Theme.Accent.claude, live: true)
+            Text("Day 1: 9 of 14.3 · Day 2: 4 of 15.2 · Today: 3 of 17.4").foregroundStyle(.white)
+            DayPaceBar(pace: pace, days: over, percent: 38, tint: Theme.Accent.codex, live: true)
+            Text("Day 1 over · Day 2 not observed · Today over").foregroundStyle(.white)
+            DayPaceBar(pace: pace, days: [CycleDay(day: 2, start: pace.dayStart, since: pace.dayStart.addingTimeInterval(3600), baseline: 10, latest: 10, allowance: 15)], percent: 10, tint: Theme.Accent.claude, live: true)
+            Text("No history yet: 10% used before today").foregroundStyle(.white)
+        }.font(Theme.Typeface.caption).padding(16).frame(width: 390).background(Color.black)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        if let image = renderer.cgImage {
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            try? bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("daily-cells-verification.png"))
+        }
     }
 
     private static func renderAgentAvailabilityFixtures(geometry: NotchGeometry, services: AppServices, to directory: URL) {

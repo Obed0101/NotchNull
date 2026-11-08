@@ -261,6 +261,8 @@ private struct ProviderUsageBlock: View {
                         forecast: agents.usageHistory.forecast(provider: provider == .opencode ? OpenCodeGoPlan.planID : provider.rawValue,
                             plan: provider == .opencode ? agents.plans.openCodeGo?.plan : usage.plan, window: window, at: context.date),
                         breakdown: window.label == "Week" ? usage.breakdown : [],
+                        days: agents.usageHistory.days(provider: provider == .opencode ? OpenCodeGoPlan.planID : provider.rawValue,
+                            plan: provider == .opencode ? agents.plans.openCodeGo?.plan : usage.plan, window: window),
                         showsRemaining: isGo ? preferences.planUsageShowsRemaining : nil)
                 }
             }
@@ -323,6 +325,7 @@ private struct PlanUsageBlock: View {
                     UsageWindowRow(window: window, tint: usage.tint, now: context.date,
                         updatedAt: usage.updatedAt, isReady: usage.state == .ready,
                         forecast: agents.usageHistory.forecast(provider: usage.id, plan: usage.plan, window: window, at: context.date),
+                        days: agents.usageHistory.days(provider: usage.id, plan: usage.plan, window: window),
                         showsRemaining: preferences.planUsageShowsRemaining)
                 }
             }
@@ -356,6 +359,7 @@ private struct UsageWindowRow: View {
     let isReady: Bool
     let forecast: UsageForecast?
     var breakdown: [UsageShare] = []
+    var days: [CycleDay] = []
     /// Overrides the global reading for "Other plans" rows: nil uses the Claude Code setting.
     var showsRemaining: Bool? = nil
     @EnvironmentObject private var preferences: Preferences
@@ -386,7 +390,6 @@ private struct UsageWindowRow: View {
         }
         let remaining = showsRemaining ?? preferences.usageShowsRemaining
         let shown = remaining ? (100 - window.percent).rounded(.down) : window.percent.rounded()
-        let elapsed = window.elapsedFraction(at: now)
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(window.label).foregroundStyle(Theme.Palette.textSecondary)
@@ -398,26 +401,39 @@ private struct UsageWindowRow: View {
                     .multilineTextAlignment(.trailing)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            UsageCellBar(percent: remaining ? 100 - window.percent : window.percent, tint: color,
-                marker: fresh ? (remaining ? elapsed.map { 1 - $0 } : elapsed) : nil)
-            if let budget {
-                ViewThatFits(in: .horizontal) {
-                    HStack {
-                        Text("Budget \(Formatting.percent(budget))/day")
-                        Spacer(minLength: 6)
-                        if let estimate { Text("Usual \(Formatting.percent(estimate.dailyUse))/day") }
-                        else if showPace { Text("Learning hours") }
+            if let pace = window.dayPace(at: now) {
+                // Day 1 starts at zero, so it never needs a recorded baseline.
+                let today = fresh ? days.last { $0.day == pace.day } ?? (pace.day == 0 ? CycleDay(day: 0,
+                    start: pace.dayStart, since: pace.dayStart, baseline: 0, latest: window.percent,
+                    allowance: 100 / Double(pace.days)) : nil) : nil
+                DayPaceBar(pace: pace, days: days.contains { $0.day == pace.day } ? days : days + (today.map { [$0] } ?? []), percent: window.percent, tint: color, live: fresh)
+                if fresh {
+                    HStack(spacing: 6) {
+                        Text(today.map { Self.todayText($0, now: now) } ?? "Today · from the next reading")
+                            .foregroundStyle(today?.over == true ? Theme.Accent.warning : Theme.Palette.textPrimary)
+                        Spacer(minLength: 4)
+                        if showPace {
+                            Text(forecastText)
+                                .foregroundStyle(estimate?.exhaustion == nil ? Theme.Palette.textSecondary : Theme.Accent.warning)
+                        } else {
+                            Text("until \(Formatting.resetTime(pace.dayEnd, now: now))")
+                        }
                     }
-                    Text("Budget \(Formatting.percent(budget))/day")
+                    .lineLimit(1)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                } else {
+                    Text("Last known usage").foregroundStyle(Theme.Palette.textSecondary)
                 }
-                .foregroundStyle(Theme.Palette.textSecondary)
-            }
-            if (window.duration ?? 0) >= 86_400 && showPace && (estimate != nil || budget == nil || window.percent >= 100) {
-                Text(forecastText)
-                    .foregroundStyle(estimate?.exhaustion == nil ? Theme.Palette.textSecondary : Theme.Accent.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if !fresh {
-                Text("Last known usage").foregroundStyle(Theme.Palette.textSecondary)
+            } else {
+                UsageCellBar(percent: remaining ? 100 - window.percent : window.percent, tint: color, marker: nil)
+                if (window.duration ?? 0) >= 86_400 && showPace && (estimate != nil || budget == nil || window.percent >= 100) {
+                    Text(forecastText)
+                        .foregroundStyle(estimate?.exhaustion == nil ? Theme.Palette.textSecondary : Theme.Accent.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !fresh {
+                    Text("Last known usage").foregroundStyle(Theme.Palette.textSecondary)
+                }
             }
         }
         .font(Theme.Typeface.caption)
@@ -426,11 +442,23 @@ private struct UsageWindowRow: View {
         .accessibilityLabel(helpText)
     }
 
+    /// Today's own consumption against today's allowance, never the running weekly total.
+    static func todayText(_ day: CycleDay, now: Date) -> String {
+        let label = day.exact ? "Today" : "Since \(day.since.formatted(date: .omitted, time: .shortened))"
+        return "\(label) \(Formatting.percent(day.used)) of \(Formatting.percent(day.allowance))"
+    }
+
     private var helpText: String {
         var lines = ["\(window.label): \(Int(100 - window.percent))% left (\(Int(window.percent))% used)"]
         if let reset = window.resetsAt { lines.append("Resets \(reset.formatted(date: .abbreviated, time: .shortened))") }
-        if let budget {
-            lines.append("Budget: \(Formatting.percent(budget)) per 24 hours on average until reset, capped at the remaining quota. This is a budget, not a forecast.")
+        if let pace = window.dayPace(at: now) {
+            lines.append("Each segment is one day of this \(pace.days)-day cycle. Days start at the reset time, not at midnight; today runs until \(pace.dayEnd.formatted(date: .abbreviated, time: .shortened)).")
+            lines.append("A segment fills with that day's usage against that day's allowance: the quota left when the day began divided by the days left, so unused quota raises later allowances and overspending lowers them. Amber means the day went over. Earlier usage fills the past days in order from the reset; empty segments are days ahead.")
+            for day in days {
+                let total = day.complete == true || day.day == pace.day ? "" : " (at least; the end of this day was not observed)"
+                let start = day.exact ? "" : " since \(day.since.formatted(date: .abbreviated, time: .shortened))"
+                lines.append("Day \(day.day + 1)\(start): \(Formatting.percent(day.used)) of \(Formatting.percent(day.allowance))\(total)")
+            }
         }
         if showPace && (window.duration ?? 0) >= 86_400 {
             lines.append(forecastText)
@@ -443,7 +471,6 @@ private struct UsageWindowRow: View {
         if !breakdown.isEmpty {
             lines.append(breakdown.filter { $0.percent > 0 }.map { "\($0.label) \(Int($0.percent))%" }.joined(separator: " · "))
         }
-        lines.append("Each cell is 10 percentage points. The white tick marks an even 24-hour budget, not your learned schedule.")
         return lines.joined(separator: "\n")
     }
 }

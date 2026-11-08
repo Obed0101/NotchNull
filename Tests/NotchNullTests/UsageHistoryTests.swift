@@ -2,6 +2,110 @@ import XCTest
 @testable import NotchNull
 
 final class UsageHistoryTests: XCTestCase {
+    func testDayPaceCountsDaysFromTheResetTimeNotMidnight() throws {
+        let reset = start.addingTimeInterval(7 * 86_400 - 12 * 3600) // cycle began at noon the day before
+        let morning = try XCTUnwrap(window(1, reset: reset).dayPace(at: start.addingTimeInterval(9 * 3600)))
+        XCTAssertEqual(morning.day, 0) // 9 AM still belongs to the day that began at noon
+        XCTAssertEqual(morning.dayStart, start.addingTimeInterval(-12 * 3600))
+        XCTAssertEqual(morning.dayEnd, start.addingTimeInterval(12 * 3600))
+        let afternoon = try XCTUnwrap(window(1, reset: reset).dayPace(at: start.addingTimeInterval(13 * 3600)))
+        XCTAssertEqual(afternoon.day, 1)
+        XCTAssertEqual(window(50, reset: reset).dayPace(at: reset.addingTimeInterval(-1))?.day, 6)
+    }
+
+    func testTodayMeasuresOnlyTodaysUsageAgainstAFixedAllowance() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        var history = UsageHistory()
+        // Day 1 starts at zero by definition, even when first seen hours later.
+        XCTAssertTrue(history.record(window(4, reset: reset), at: start.addingTimeInterval(5 * 3600), now: start.addingTimeInterval(5 * 3600)))
+        XCTAssertTrue(history.record(window(9, reset: reset), at: start.addingTimeInterval(86_400 - 300), now: start.addingTimeInterval(86_400 - 300)))
+        // First reading after the boundary: yesterday ended at 9%, today's baseline is known.
+        let morning = start.addingTimeInterval(86_400 + 300)
+        XCTAssertTrue(history.record(window(9.5, reset: reset), at: morning, now: morning))
+        let later = start.addingTimeInterval(86_400 + 6 * 3600)
+        XCTAssertTrue(history.record(window(12, reset: reset), at: later, now: later))
+        let days = history.days(for: window(12, reset: reset))
+        XCTAssertEqual(days.count, 2)
+        XCTAssertEqual(days[0].used, 9, accuracy: 0.001)
+        XCTAssertEqual(days[0].allowance, 100.0 / 7, accuracy: 0.001)
+        XCTAssertEqual(days[0].complete, true)
+        XCTAssertTrue(days[1].exact)
+        XCTAssertEqual(days[1].used, 3, accuracy: 0.001)
+        // Unused quota from day 1 raises day 2's allowance, which stays fixed during the day.
+        XCTAssertEqual(days[1].allowance, 91.0 / 6, accuracy: 0.001)
+        XCTAssertFalse(days[1].over)
+    }
+
+    func testUnobservedBoundaryStartsTodayAtTheFirstReadingInsteadOfGuessing() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        var history = UsageHistory()
+        XCTAssertTrue(history.record(window(9, reset: reset), at: start.addingTimeInterval(20 * 3600), now: start.addingTimeInterval(20 * 3600)))
+        // The Mac slept across the boundary; the counter moved meanwhile.
+        let wake = start.addingTimeInterval(86_400 + 3 * 3600)
+        XCTAssertTrue(history.record(window(15, reset: reset), at: wake, now: wake))
+        let days = history.days(for: window(15, reset: reset))
+        XCTAssertEqual(days[0].complete, false)
+        XCTAssertFalse(days[1].exact)
+        XCTAssertEqual(days[1].since, wake)
+        XCTAssertEqual(days[1].used, 0)
+        XCTAssertEqual(days[1].allowance, 85.0 / 6, accuracy: 0.001)
+    }
+
+    func testOverspendingIsFlaggedAndNewCycleClearsDays() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        var history = UsageHistory()
+        XCTAssertTrue(history.record(window(20, reset: reset), at: start.addingTimeInterval(3600), now: start.addingTimeInterval(3600)))
+        XCTAssertTrue(try XCTUnwrap(history.days(for: window(20, reset: reset)).last).over)
+        let next = reset.addingTimeInterval(3600)
+        XCTAssertTrue(history.record(window(1, reset: reset.addingTimeInterval(7 * 86_400)), at: next, now: next))
+        XCTAssertEqual(history.days(for: window(1, reset: reset.addingTimeInterval(7 * 86_400))).map(\.day), [0])
+        XCTAssertTrue(history.days(for: window(20, reset: reset)).isEmpty)
+    }
+
+    func testDayPaceNeedsAMultiDayWindowBeforeItsReset() {
+        let reset = start.addingTimeInterval(5 * 3600)
+        XCTAssertNil(UsageWindow(id: "s", label: "Session", percent: 10, resetsAt: reset, duration: 5 * 3600).dayPace(at: start))
+        XCTAssertNil(UsageWindow(id: "w", label: "Week", percent: 10, resetsAt: nil, duration: 7 * 86_400).dayPace(at: start))
+        XCTAssertNil(window(10, reset: start).dayPace(at: start))
+        XCTAssertNil(window(10, reset: start.addingTimeInterval(9 * 86_400)).dayPace(at: start))
+    }
+
+    @MainActor
+    func testDisabledCleanupAndMissingPlansSurviveRestart() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let reset = start.addingTimeInterval(7 * 86_400)
+        let store = UsageHistoryStore(url: url, now: start)
+        for provider in ["claude", "codex", "zai", "kimi"] {
+            store.record(provider: provider, plan: nil, windows: [window(1, reset: reset)], updatedAt: start, state: .ready, now: start)
+        }
+        XCTAssertFalse(store.isCleanupScheduled)
+        store.setActive(true, now: start)
+        XCTAssertTrue(store.isCleanupScheduled)
+        store.interrupt(provider: "claude")
+        store.interruptMissingPlans(present: ["kimi"])
+        store.setActive(false, now: start)
+        XCTAssertFalse(store.isCleanupScheduled)
+        store.waitForPendingWrites()
+        let restored = UsageHistoryStore(url: url, now: start)
+        XCTAssertFalse(restored.isCleanupScheduled)
+        let recovered = start.addingTimeInterval(1800)
+        for provider in ["claude", "codex", "zai", "kimi"] {
+            restored.record(provider: provider, plan: nil, windows: [window(1, reset: reset)], updatedAt: recovered, state: .ready, now: recovered)
+        }
+        restored.waitForPendingWrites()
+        let saved = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
+        for provider in ["claude", "codex", "zai", "kimi"] {
+            let key = UsageHistoryStore.key(provider: provider, plan: nil, window: window(1, reset: reset))
+            XCTAssertEqual(saved[key]?.intervals.count, ["claude", "zai"].contains(provider) ? 0 : 1)
+        }
+        restored.setActive(true, now: start.addingTimeInterval(29 * 86_400))
+        XCTAssertFalse(restored.isCleanupScheduled)
+        restored.waitForPendingWrites()
+        XCTAssertTrue(try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url)).isEmpty)
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
