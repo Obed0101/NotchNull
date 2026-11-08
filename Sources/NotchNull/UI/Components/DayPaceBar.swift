@@ -16,20 +16,21 @@ struct DayPaceBar: View {
     enum Cell: Equatable {
         case day(CycleDay)
         /// Usage from a day NotchNull could not measure exactly, against that day's allowance.
-        case earlier(amount: Double, allowance: Double)
+        /// `proven` is the part of the amount recorded for that day itself; only it can show an overspend.
+        case earlier(amount: Double, allowance: Double, proven: Double)
         case empty
 
         var fraction: Double {
             switch self {
             case .day(let day): day.fraction
-            case .earlier(let amount, let allowance): allowance > 0 ? min(1, amount / allowance) : (amount > 0 ? 1 : 0)
+            case .earlier(let amount, let allowance, _): allowance > 0 ? min(1, amount / allowance) : (amount > 0 ? 1 : 0)
             case .empty: 0
             }
         }
         var over: Bool {
             switch self {
             case .day(let day): day.over
-            case .earlier(let amount, let allowance): amount > allowance + 0.05
+            case .earlier(_, let allowance, let proven): proven > allowance + 0.05
             case .empty: false
             }
         }
@@ -37,7 +38,7 @@ struct DayPaceBar: View {
 
     /// Days with an exact total draw their own usage. Usage from every other past day (not seen,
     /// or seen only in part) starts from what was recorded for it, a lower bound that keeps a
-    /// known overspend amber, and the unmeasured remainder fills the rest in order from the
+    /// proven overspend amber, and the unmeasured remainder fills the rest in order from the
     /// reset, so the bar never loses quota the provider reports as already used.
     static func layout(pace: DayPace, days: [CycleDay], percent: Double) -> [Cell] {
         let today = days.last { $0.day == pace.day }
@@ -55,14 +56,15 @@ struct DayPaceBar: View {
             amount[index, default: 0] += take
             pool -= take
         }
-        // Whatever still does not fit belongs to the days before today, so it lands on the last of them.
+        // Whatever still does not fit was spent before today, so it lands on the last of them, but
+        // never as an overspend: the split between those days and today's untracked hours is unknown.
         if pool > 0.05, let last = open.last { amount[last, default: 0] += pool }
         return (0..<pace.days).map { index in
             if index == pace.day { return today.map(Cell.day) ?? .empty }
             if index > pace.day { return .empty }
             if let entry = exact(index) { return .day(entry) }
             let used = amount[index, default: 0]
-            return used > 0.05 ? .earlier(amount: used, allowance: allowance(index)) : .empty
+            return used > 0.05 ? .earlier(amount: used, allowance: allowance(index), proven: recorded(index)?.used ?? 0) : .empty
         }
     }
 
