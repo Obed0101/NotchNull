@@ -22,6 +22,17 @@ final class ClaudeSharedUsageTests: XCTestCase {
         XCTAssertNil(result.plan)
     }
 
+    func testPlanNamesPreserveDistinctSubscriptions() throws {
+        for (raw, expected) in [(" ultra ", "Ultra"), ("max", "Max"), ("pro", "Pro"), ("team", "Team")] {
+            XCTAssertEqual(ClaudeUsageService.planName(raw), expected)
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture()) as? [String: Any])
+            object["plan"] = raw
+            let usage = ClaudeSharedUsage.parse(try JSONSerialization.data(withJSONObject: object), now: now)
+            XCTAssertEqual(usage.plan, expected)
+            XCTAssertEqual(usage.windows.first?.percent, 8)
+        }
+    }
+
     func testStaleReadingDoesNotBecomeFreshWhenFileIsRewritten() throws {
         let result = ClaudeSharedUsage.parse(try fixture(age: 1201), now: now)
         XCTAssertNotEqual(result.state, .ready)

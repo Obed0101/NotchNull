@@ -27,6 +27,7 @@ final class AgentHub: ObservableObject {
     @Published private(set) var opencodePluginError: String?
 
     private var server: AgentEventServer?
+    let usageHistory = UsageHistoryStore()
     private var cancellables: Set<AnyCancellable> = []
     private let installation: AgentInstallation
     private var activationThrottle = AgentAvailabilityRefreshThrottle()
@@ -58,6 +59,35 @@ final class AgentHub: ObservableObject {
             .sink { [weak self] _ in self?.opencode.refreshNow() }
             .store(in: &cancellables)
 
+        // Observe source publications even while the panel is closed; never poll providers again.
+        let prefs = Preferences.shared
+        prefs.$claudeUsageEnabled.combineLatest(prefs.$codexEnabled, prefs.$opencodeEnabled, prefs.$planUsageEnabled)
+            .sink { [weak self] claude, codex, opencode, plans in
+                self?.usageHistory.setActive(claude || codex || opencode || plans)
+            }.store(in: &cancellables)
+        claudeUsage.$usage.combineLatest(prefs.$claudeUsageEnabled)
+            .merge(with: codex.$usage.combineLatest(prefs.$codexEnabled),
+                   opencode.$usage.combineLatest(prefs.$opencodeEnabled))
+            .sink { [weak self] usage, enabled in
+                guard enabled else {
+                    self?.usageHistory.interrupt(provider: usage.provider.rawValue)
+                    return
+                }
+                self?.usageHistory.record(provider: usage.provider.rawValue, plan: usage.plan,
+                    windows: usage.windows, updatedAt: usage.updatedAt, state: usage.state)
+            }.store(in: &cancellables)
+        prefs.$opencodeAccountUsageAllowed.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.usageHistory.interruptMissingPlans(present: []) }
+            .store(in: &cancellables)
+        plans.$usages.combineLatest(prefs.$planUsageEnabled)
+            .sink { [weak self] usages, enabled in
+            let usages = enabled ? usages : []
+            self?.usageHistory.interruptMissingPlans(present: Set(usages.map(\.id)))
+            for usage in usages {
+                self?.usageHistory.record(provider: usage.id, plan: usage.plan,
+                    windows: usage.windows, updatedAt: usage.updatedAt, state: usage.state)
+            }
+        }.store(in: &cancellables)
         let warn: (String, UsageWindow) -> Void = { [weak self] provider, window in
             self?.warning = Warning(provider: provider, window: window)
             ActivityCenter.shared.post(.usageWarning, for: Constants.Durations.usageWarning)

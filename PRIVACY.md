@@ -51,6 +51,7 @@ Everything lives in `~/Library/Application Support/NotchNull/`:
 | `hook-token` | The per-install secret for the local API and hooks, readable only by you |
 | `claude-hook.sh` | Only after you enable approval alerts |
 | `download-cleanup.json` | Downloads waiting for their deadline: file name, size, source site, a bookmark to follow renames, and when it expires |
+| `usage-history.json` | Up to 28 days of observed quota changes and timestamps, plus the current limit cycle's per-day consumption and fixed daily allowance, grouped by provider, plan and limit. Used locally for the day-by-day usage bar and to estimate consumption by hour of day; no prompts, credentials or additional provider requests. A day whose start was not observed is marked as such, never counted as complete. Quit the app and remove this file to reset learning. |
 | `~/.config/opencode/plugins/notchnull.js` | Only after you enable the opencode plugin in Settings → Agents |
 
 Opening a clipboard image or text (the open button on its tile, or ⌘O) writes one unencrypted copy to `NotchNull-clipboard/` in your user's temporary folder so another app can show it. It holds one item at a time and is deleted on the next open and when NotchNull starts. Files and links open in place; nothing is written for them.
