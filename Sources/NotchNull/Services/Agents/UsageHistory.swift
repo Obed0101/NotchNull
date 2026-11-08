@@ -15,6 +15,7 @@ struct UsageHistory: Codable, Equatable {
     }
     var last: Reading?
     var intervals: [Interval] = []
+    var interrupted: Bool? = nil
 
     mutating func record(_ window: UsageWindow, at date: Date, now: Date) -> Bool {
         guard let reset = window.resetsAt, let duration = window.duration,
@@ -23,7 +24,7 @@ struct UsageHistory: Codable, Equatable {
               reset > date, reset.timeIntervalSince(date) <= duration + 60,
               last.map({ date > $0.date }) ?? true else { return false }
         let reading = Reading(date: date, percent: window.percent, reset: reset, duration: duration)
-        if let previous = last {
+        if let previous = last, interrupted != true {
             if previous.duration != duration { intervals = [] }
             // Never spread a long offline gap across presumed working hours or bridge a reset.
             let gap = date.timeIntervalSince(previous.date)
@@ -46,6 +47,7 @@ struct UsageHistory: Codable, Equatable {
             }
         }
         last = reading
+        interrupted = nil
         prune(at: now)
         return true
     }
@@ -83,7 +85,7 @@ struct UsageHistory: Codable, Equatable {
     }
 
     func forecast(_ window: UsageWindow, at now: Date, calendar: Calendar = .current) -> UsageForecast? {
-        guard let last, now.timeIntervalSince(last.date) >= 0, now.timeIntervalSince(last.date) <= 1200,
+        guard interrupted != true, let last, now.timeIntervalSince(last.date) >= 0, now.timeIntervalSince(last.date) <= 1200,
               let reset = window.resetsAt, reset > now, reset.timeIntervalSince(now) <= 35 * 86_400,
               abs(last.reset.timeIntervalSince(reset)) < 60, last.percent == window.percent,
               last.duration == window.duration, window.percent < 100,
@@ -160,7 +162,18 @@ final class UsageHistoryStore {
     }
 
     func record(provider: String, plan: String?, windows: [UsageWindow], updatedAt: Date?, state: ProviderUsage.State, now: Date = Date()) {
-        guard state == .ready, let updatedAt else { return }
+        guard state == .ready, let updatedAt else {
+            var changed = false
+            for key in Array(histories.keys) {
+                guard let data = key.data(using: .utf8),
+                      let parts = try? JSONDecoder().decode([String].self, from: data),
+                      parts.first == provider, histories[key]?.interrupted != true else { continue }
+                histories[key]?.interrupted = true
+                changed = true
+            }
+            if changed { persist() }
+            return
+        }
         var changed = false
         for window in windows {
             let key = Self.key(provider: provider, plan: plan, window: window)

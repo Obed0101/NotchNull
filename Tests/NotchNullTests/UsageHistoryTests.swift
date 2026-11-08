@@ -162,6 +162,34 @@ final class UsageHistoryTests: XCTestCase {
     }
 
     @MainActor
+    func testUnavailableBreaksContinuityAcrossRestartWithoutDiscardingHistory() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let reset = start.addingTimeInterval(7 * 86_400)
+        let key = UsageHistoryStore.key(provider: "claude", plan: "Max", window: window(1, reset: reset))
+        let store = UsageHistoryStore(url: url, now: start, scheduleCleanup: false)
+        for (minutes, percent) in [(0, 1.0), (10, 2.0)] {
+            let date = start.addingTimeInterval(Double(minutes) * 60)
+            store.record(provider: "claude", plan: "Max", windows: [window(percent, reset: reset)], updatedAt: date, state: .ready, now: date)
+        }
+        store.record(provider: "claude", plan: nil, windows: [], updatedAt: nil, state: .unavailable("offline"), now: start.addingTimeInterval(1200))
+        store.waitForPendingWrites()
+        let restored = UsageHistoryStore(url: url, now: start.addingTimeInterval(1800), scheduleCleanup: false)
+        let recovered = start.addingTimeInterval(2400)
+        restored.record(provider: "claude", plan: "Max", windows: [window(3, reset: reset)], updatedAt: recovered, state: .ready, now: recovered)
+        restored.waitForPendingWrites()
+        let saved = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
+        XCTAssertEqual(saved[key]?.intervals.count, 1)
+        XCTAssertEqual(saved[key]?.intervals.first?.used, 1)
+        let next = recovered.addingTimeInterval(600)
+        restored.record(provider: "claude", plan: "Max", windows: [window(4, reset: reset)], updatedAt: next, state: .ready, now: next)
+        restored.waitForPendingWrites()
+        let later = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
+        XCTAssertEqual(later[key]?.intervals.count, 2)
+    }
+
+    @MainActor
     func testStoreSeparatesProvidersAndPlansAndRejectsUnavailableReadings() {
         let store = UsageHistoryStore(url: nil)
         let (_, now, reset) = learnedHistory()
