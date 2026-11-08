@@ -34,7 +34,7 @@ struct AgentsTab: View {
         HStack(spacing: 10) {
             Card(padding: 8) {
                 NotchScroll {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 3) {
                         if agents.installed.isEmpty {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(AgentAvailabilityCopy.noAgentsInstalledTitle)
@@ -185,7 +185,7 @@ private struct ProviderUsageBlock: View {
         let usage = agents.usage(for: provider)
         let tokens = agents.tokens(for: provider)
         let isRunning = sessions.running.contains { $0.provider == provider }
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 7) {
                 ProviderMark(provider: provider, animating: isRunning, size: 14)
                 Text(provider.title)
@@ -255,13 +255,13 @@ private struct ProviderUsageBlock: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(usage.windows) { window in
-                    UsageWindowRow(
-                        window: window,
-                        tint: provider.tint,
-                        now: context.date,
+                    UsageWindowRow(window: window, tint: provider.tint, now: context.date,
+                        updatedAt: provider == .opencode ? agents.plans.openCodeGo?.updatedAt : usage.updatedAt,
+                        isReady: isGo ? agents.plans.openCodeGo?.state == .ready : usage.state == .ready,
+                        forecast: agents.usageHistory.forecast(provider: provider == .opencode ? OpenCodeGoPlan.planID : provider.rawValue,
+                            plan: provider == .opencode ? agents.plans.openCodeGo?.plan : usage.plan, window: window, at: context.date),
                         breakdown: window.label == "Week" ? usage.breakdown : [],
-                        showsRemaining: isGo ? preferences.planUsageShowsRemaining : nil
-                    )
+                        showsRemaining: isGo ? preferences.planUsageShowsRemaining : nil)
                 }
             }
             .help(windowsHelp(usage, isGo: isGo, now: context.date))
@@ -282,6 +282,7 @@ private struct ProviderUsageBlock: View {
 private struct PlanUsageBlock: View {
     let usage: PlanUsage
     @EnvironmentObject private var preferences: Preferences
+    @EnvironmentObject private var agents: AgentHub
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -319,7 +320,10 @@ private struct PlanUsageBlock: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(usage.windows) { window in
-                    UsageWindowRow(window: window, tint: usage.tint, now: context.date, showsRemaining: preferences.planUsageShowsRemaining)
+                    UsageWindowRow(window: window, tint: usage.tint, now: context.date,
+                        updatedAt: usage.updatedAt, isReady: usage.state == .ready,
+                        forecast: agents.usageHistory.forecast(provider: usage.id, plan: usage.plan, window: window, at: context.date),
+                        showsRemaining: preferences.planUsageShowsRemaining)
                 }
             }
             .help("Key from \(usage.source), updated \(usage.updatedAt.map { Formatting.relative($0, now: context.date) } ?? "—")")
@@ -348,12 +352,43 @@ private struct UsageWindowRow: View {
     let window: UsageWindow
     let tint: Color
     let now: Date
+    let updatedAt: Date?
+    let isReady: Bool
+    let forecast: UsageForecast?
     var breakdown: [UsageShare] = []
     /// Overrides the global reading for "Other plans" rows: nil uses the Claude Code setting.
     var showsRemaining: Bool? = nil
     @EnvironmentObject private var preferences: Preferences
     private var showPace: Bool { preferences.paceWarnings }
-    private var compact: Bool { preferences.panelWidth < 640 }
+    private var fresh: Bool {
+        isReady && updatedAt.map { now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) <= 1200 } == true
+    }
+    private var budget: Double? { fresh ? window.dailyBudget(at: now) : nil }
+    private var estimate: UsageForecast? { fresh && showPace ? forecast : nil }
+    private var forecastText: String {
+        if !fresh { return "Last known usage · waiting for update" }
+        if let reset = window.resetsAt, reset <= now { return "Reset passed · waiting for update" }
+        if window.percent >= 100 { return "Limit reached · waiting for reset" }
+        if let estimate {
+            if let exhaustion = estimate.exhaustion {
+                return "Est. runs out \(Formatting.resetTime(exhaustion, now: now))"
+            }
+            return "Est. lasts until reset"
+        }
+        return "Learning your hours"
+    }
+
+    /// How far through the cycle it is, only while the reading is fresh and the reset is still ahead.
+    private var elapsed: Double? {
+        fresh ? window.resetsAt.flatMap { $0 > now ? window.elapsedFraction(at: now) : nil } : nil
+    }
+
+    /// The visible pace line, shared with the accessibility text so both always agree.
+    private var paceLine: (text: String, ahead: Double)? {
+        guard let days = window.dayCount, let elapsed else { return nil }
+        let ahead = window.percent - elapsed * 100
+        return ("Day \(min(days, Int(elapsed * Double(days)) + 1)) of \(days) · \(Self.paceText(ahead))", ahead)
+    }
 
     var body: some View {
         let color: Color = switch window.severity {
@@ -361,88 +396,80 @@ private struct UsageWindowRow: View {
         case .warning: Theme.Accent.warning
         case .normal: tint
         }
-        // Remaining mode reads like a battery: the bar empties as you use it, and the tick
-        // marks how much time is left, so a fill shorter than the tick means you are over pace.
         let remaining = showsRemaining ?? preferences.usageShowsRemaining
-        // What is left rounds down, so "100% left" only appears before anything is used.
         let shown = remaining ? (100 - window.percent).rounded(.down) : window.percent.rounded()
-        let elapsed = window.elapsedFraction(at: now)
-        let exhaustion = showPace ? window.projectedExhaustion(at: now) : nil
-        HStack(spacing: 6) {
-            Text(window.label)
-                .font(Theme.Typeface.caption)
-                .foregroundStyle(Theme.Palette.textSecondary)
-                .frame(width: 40, alignment: .leading)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-            UsageBar(percent: shown, tint: color, paceFraction: remaining ? elapsed.map { 1 - $0 } : elapsed, height: preferences.panelHeight >= 176 ? 8 : 6)
-                .frame(maxWidth: .infinity)
-                .layoutPriority(1)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(Int(shown))%")
-                    .font(Theme.Typeface.metric)
-                    .foregroundStyle(Theme.Palette.textPrimary)
-                    .contentTransition(.numericText(value: shown))
-                Text(remaining ? "left" : "used")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Theme.Palette.textTertiary)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(window.label).foregroundStyle(Theme.Palette.textSecondary)
+                Text("\(Int(shown))% \(remaining ? "left" : "used")")
+                    .font(Theme.Typeface.metric).foregroundStyle(Theme.Palette.textPrimary)
+                Spacer(minLength: 0)
+                Text(window.resetsAt.map { "Resets \(Formatting.resetTime($0, now: now))" } ?? "Reset unknown")
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .fixedSize()
-            .frame(width: 52, alignment: .leading)
-            timeColumn(exhaustion: exhaustion)
-                .frame(width: compact ? 60 : 74, alignment: .trailing)
+            if let days = window.dayCount {
+                DayCellBar(percent: window.percent, days: days, tint: color, elapsed: elapsed)
+                if fresh {
+                    HStack(spacing: 6) {
+                        if let pace = paceLine {
+                            Text(pace.text)
+                                .foregroundStyle(pace.ahead > 0.05 ? Theme.Accent.warning : Theme.Palette.textPrimary)
+                        }
+                        Spacer(minLength: 4)
+                        if showPace {
+                            Text(forecastText)
+                                .foregroundStyle(estimate?.exhaustion == nil ? Theme.Palette.textSecondary : Theme.Accent.warning)
+                        }
+                    }
+                    .lineLimit(1)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                } else {
+                    Text("Last known usage").foregroundStyle(Theme.Palette.textSecondary)
+                }
+            } else {
+                UsageCellBar(percent: remaining ? 100 - window.percent : window.percent, tint: color, marker: nil)
+                if (window.duration ?? 0) >= 86_400 && showPace && (estimate != nil || budget == nil || window.percent >= 100) {
+                    Text(forecastText)
+                        .foregroundStyle(estimate?.exhaustion == nil ? Theme.Palette.textSecondary : Theme.Accent.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !fresh {
+                    Text("Last known usage").foregroundStyle(Theme.Palette.textSecondary)
+                }
+            }
         }
+        .font(Theme.Typeface.caption)
         .help(helpText)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
+        .accessibilityLabel(helpText)
     }
 
-    /// Reset time, or — when the current pace empties the window first — when it runs out, in amber.
-    @ViewBuilder
-    private func timeColumn(exhaustion: Date?) -> some View {
-        if let exhaustion {
-            HStack(spacing: 3) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 8, weight: .bold))
-                Text(Formatting.resetTime(exhaustion, now: now))
-                    .font(Theme.Typeface.caption.monospacedDigit())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(Theme.Accent.warning)
-            .transition(.opacity.combined(with: .scale(scale: 0.9)))
-        } else {
-            Text(window.resetsAt.map { Formatting.resetTime($0, now: now) } ?? "—")
-                .font(Theme.Typeface.caption.monospacedDigit())
-                .foregroundStyle(Theme.Palette.textTertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .transition(.opacity)
-        }
-    }
-
-    private var accessibilityText: String {
-        var text = "\(window.label) limit \(Int(100 - window.percent)) percent left"
-        if showPace, let exhaustion = window.projectedExhaustion(at: now) {
-            text += ", runs out \(Formatting.moment(exhaustion, now: now)) at the current pace"
-        }
-        return text
+    /// Distance between usage and an even spread over the cycle so far; positive means ahead of it.
+    static func paceText(_ ahead: Double) -> String {
+        abs(ahead) < 0.05 ? "on pace"
+            : ahead > 0 ? "\(Formatting.percent(ahead)) over pace" : "\(Formatting.percent(-ahead)) under pace"
     }
 
     private var helpText: String {
         var lines = ["\(window.label): \(Int(100 - window.percent))% left (\(Int(window.percent))% used)"]
         if let reset = window.resetsAt { lines.append("Resets \(reset.formatted(date: .abbreviated, time: .shortened))") }
-        if let rates = window.rates(at: now) {
-            let unit = rates.unit >= 86_400 ? "day" : "hour"
-            lines.append("Pace: \(Formatting.percent(rates.used)) per \(unit) so far; \(Formatting.percent(rates.budget)) per \(unit) lasts until the reset.")
-            if let exhaustion = window.projectedExhaustion(at: now) {
-                lines.append("At this pace it runs out \(Formatting.moment(exhaustion, now: now)), before it resets.")
+        if let pace = paceLine { lines.append(pace.text) }
+        if let days = window.dayCount {
+            lines.append("The bar runs from 0 to 100% of the quota used, cut into \(days) cells, one per day of this cycle (about \(Formatting.percent(100 / Double(days))) each). Usage fills from the left. The white tick marks where the cycle is in time, counted from the reset: fill short of it is under pace, fill past it is ahead.")
+        }
+        if showPace && (window.duration ?? 0) >= 86_400 {
+            lines.append(forecastText)
+            if let estimate {
+                lines.append("Usual consumption: \(Formatting.percent(estimate.dailyUse)) per day. Estimated from observed quota changes by local hour over the last 28 days; your habits can change.")
+            } else if fresh {
+                lines.append("Personalized estimates need at least three observed hours on three different dates for each hour of the day. Offline gaps are unknown, not zero usage.")
             }
         }
         if !breakdown.isEmpty {
             lines.append(breakdown.filter { $0.percent > 0 }.map { "\($0.label) \(Int($0.percent))%" }.joined(separator: " · "))
         }
-        lines.append("The white tick marks how much time is left in the window.")
         return lines.joined(separator: "\n")
     }
 }

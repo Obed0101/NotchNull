@@ -262,8 +262,9 @@ final class ClaudeUsageService: ObservableObject {
         }
     }
 
-    private nonisolated static func planName(_ raw: String) -> String {
-        switch raw.lowercased() {
+    nonisolated static func planName(_ raw: String) -> String {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "ultra": "Ultra"
         case "max": "Max"
         case "pro": "Pro"
         case "team": "Team"

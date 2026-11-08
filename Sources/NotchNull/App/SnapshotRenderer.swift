@@ -26,6 +26,7 @@ enum SnapshotRenderer {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let services = AppServices()
         seed(services)
+        renderDailyCells(to: directory)
         let geometry = NotchGeometry(
             screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
             notchSize: CGSize(width: 185, height: 32),
@@ -66,6 +67,26 @@ enum SnapshotRenderer {
         preferences.panelWidth = 680
         preferences.panelHeight = 200
         render(large, geometry: geometry, services: services, to: directory)
+        // Weekly-only subscriptions, the common compact usage-budget layout.
+        let savedClaude = services.agents.claudeUsage.usage
+        let savedCodex = services.agents.codex.usage
+        let savedPlans = services.agents.plans.usages
+        var weeklyClaude = savedClaude
+        var weeklyCodex = savedCodex
+        weeklyClaude.windows.removeAll { ($0.duration ?? 0) < 86_400 }
+        weeklyCodex.windows.removeAll { ($0.duration ?? 0) < 86_400 }
+        services.agents.claudeUsage.preview(weeklyClaude)
+        services.agents.codex.preview(usage: weeklyCodex, tokens: services.agents.codex.tokens)
+        services.agents.plans.preview([])
+        render([("53-weekly-agents", .open, .agents)], geometry: geometry, services: services, to: directory)
+        preferences.panelWidth = 540
+        preferences.panelHeight = 172
+        render([("43-weekly-agents", .open, .agents)], geometry: geometry, services: services, to: directory)
+        services.agents.claudeUsage.preview(savedClaude)
+        services.agents.codex.preview(usage: savedCodex, tokens: services.agents.codex.tokens)
+        services.agents.plans.preview(savedPlans)
+        preferences.panelWidth = 680
+        preferences.panelHeight = 200
         renderHomeFits(geometry: geometry, services: services, to: directory)
         (preferences.panelWidth, preferences.panelHeight) = (saved.0, saved.1)
         preferences.closedExtraWidth = 90
@@ -183,6 +204,27 @@ enum SnapshotRenderer {
         }
         let count: Int = [states.count, medium.count, large.count, wideClosed.count, island.count, 16].reduce(0, +)
         print("Rendered \(count) snapshots to \(directory.path)")
+    }
+
+    private static func renderDailyCells(to directory: URL) {
+        func row(_ label: String, used: Double, elapsed: Double, _ tint: Color) -> some View {
+            VStack(alignment: .leading, spacing: 4) {
+                DayCellBar(percent: used, days: 7, tint: tint, elapsed: elapsed)
+                Text(label).foregroundStyle(.white)
+            }
+        }
+        let view = VStack(alignment: .leading, spacing: 14) {
+            row("Day 2, halfway: 11% used, tick at 21% (under pace)", used: 11, elapsed: 1.5 / 7, Theme.Accent.claude)
+            row("Day 2, halfway: 30% used, fill past the tick (over pace)", used: 30, elapsed: 1.5 / 7, Theme.Accent.codex)
+            row("Day 4 end: 57% used, tick at 57%", used: 57, elapsed: 4.0 / 7, Theme.Accent.claude)
+            row("Cycle just reset: tick at the start", used: 2, elapsed: 0, Theme.Accent.claude)
+        }.font(Theme.Typeface.caption).padding(16).frame(width: 390).background(Color.black)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        if let image = renderer.cgImage {
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            try? bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("daily-cells-verification.png"))
+        }
     }
 
     private static func renderAgentAvailabilityFixtures(geometry: NotchGeometry, services: AppServices, to directory: URL) {
