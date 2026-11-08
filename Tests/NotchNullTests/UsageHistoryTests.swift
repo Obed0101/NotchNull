@@ -2,139 +2,32 @@ import XCTest
 @testable import NotchNull
 
 final class UsageHistoryTests: XCTestCase {
-    func testDayPaceCountsDaysFromTheResetTimeNotMidnight() throws {
-        let reset = start.addingTimeInterval(7 * 86_400 - 12 * 3600) // cycle began at noon the day before
-        let morning = try XCTUnwrap(window(1, reset: reset).dayPace(at: start.addingTimeInterval(9 * 3600)))
-        XCTAssertEqual(morning.day, 0) // 9 AM still belongs to the day that began at noon
-        XCTAssertEqual(morning.dayStart, start.addingTimeInterval(-12 * 3600))
-        XCTAssertEqual(morning.dayEnd, start.addingTimeInterval(12 * 3600))
-        let afternoon = try XCTUnwrap(window(1, reset: reset).dayPace(at: start.addingTimeInterval(13 * 3600)))
-        XCTAssertEqual(afternoon.day, 1)
-        XCTAssertEqual(window(50, reset: reset).dayPace(at: reset.addingTimeInterval(-1))?.day, 6)
+    func testDayCellsFillFromZeroToOneHundredAcrossTheCycle() {
+        let share = 100.0 / 7
+        XCTAssertEqual(DayCellBar.fill(percent: 0, index: 0, days: 7), 0)
+        XCTAssertEqual(DayCellBar.fill(percent: 11, index: 0, days: 7), 11 / share, accuracy: 0.0001)
+        XCTAssertEqual(DayCellBar.fill(percent: 11, index: 1, days: 7), 0)
+        XCTAssertEqual(DayCellBar.fill(percent: 20, index: 0, days: 7), 1)
+        XCTAssertEqual(DayCellBar.fill(percent: 20, index: 1, days: 7), (20 - share) / share, accuracy: 0.0001)
+        XCTAssertEqual(DayCellBar.fill(percent: 100, index: 6, days: 7), 1, accuracy: 0.0001)
+        let total = (0..<7).map { DayCellBar.fill(percent: 57, index: $0, days: 7) }.reduce(0, +) * share
+        XCTAssertEqual(total, 57, accuracy: 0.0001)
     }
 
-    func testTodayMeasuresOnlyTodaysUsageAgainstAFixedAllowance() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        var history = UsageHistory()
-        // Day 1 starts at zero by definition, even when first seen hours later.
-        XCTAssertTrue(history.record(window(4, reset: reset), at: start.addingTimeInterval(5 * 3600), now: start.addingTimeInterval(5 * 3600)))
-        XCTAssertTrue(history.record(window(9, reset: reset), at: start.addingTimeInterval(86_400 - 300), now: start.addingTimeInterval(86_400 - 300)))
-        // First reading after the boundary: yesterday ended at 9%, today's baseline is known.
-        let morning = start.addingTimeInterval(86_400 + 300)
-        XCTAssertTrue(history.record(window(9.5, reset: reset), at: morning, now: morning))
-        let later = start.addingTimeInterval(86_400 + 6 * 3600)
-        XCTAssertTrue(history.record(window(12, reset: reset), at: later, now: later))
-        let days = history.days(for: window(12, reset: reset))
-        XCTAssertEqual(days.count, 2)
-        XCTAssertEqual(days[0].used, 9, accuracy: 0.001)
-        XCTAssertEqual(days[0].allowance, 100.0 / 7, accuracy: 0.001)
-        XCTAssertEqual(days[0].complete, true)
-        XCTAssertTrue(days[1].exact)
-        XCTAssertEqual(days[1].used, 3, accuracy: 0.001)
-        // Unused quota from day 1 raises day 2's allowance, which stays fixed during the day.
-        XCTAssertEqual(days[1].allowance, 91.0 / 6, accuracy: 0.001)
-        XCTAssertFalse(days[1].over)
+    func testTickSitsInsideTheCellOfTheCurrentDay() {
+        // 6 cells' worth of width plus gaps: halfway through day 2 is the middle of the second cell.
+        let width: CGFloat = 7 * 20 + 6 * 2
+        XCTAssertEqual(DayCellBar.tickOffset(elapsed: 0, days: 7, width: width), 0, accuracy: 0.001)
+        XCTAssertEqual(DayCellBar.tickOffset(elapsed: 1.5 / 7, days: 7, width: width), 22 + 10, accuracy: 0.001)
+        XCTAssertEqual(DayCellBar.tickOffset(elapsed: 1, days: 7, width: width), width, accuracy: 0.001)
+        XCTAssertEqual(DayCellBar.tickOffset(elapsed: 9, days: 7, width: width), width, accuracy: 0.001)
     }
 
-    func testUnobservedBoundaryStartsTodayAtTheFirstReadingInsteadOfGuessing() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        var history = UsageHistory()
-        XCTAssertTrue(history.record(window(9, reset: reset), at: start.addingTimeInterval(20 * 3600), now: start.addingTimeInterval(20 * 3600)))
-        // The Mac slept across the boundary; the counter moved meanwhile.
-        let wake = start.addingTimeInterval(86_400 + 3 * 3600)
-        XCTAssertTrue(history.record(window(15, reset: reset), at: wake, now: wake))
-        let days = history.days(for: window(15, reset: reset))
-        XCTAssertEqual(days[0].complete, false)
-        XCTAssertFalse(days[1].exact)
-        XCTAssertEqual(days[1].since, wake)
-        XCTAssertEqual(days[1].used, 0)
-        XCTAssertEqual(days[1].allowance, 85.0 / 6, accuracy: 0.001)
-    }
-
-    func testBoundaryBaselineNeedsReadingsOnBothSidesOfTheBoundary() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        var history = UsageHistory()
-        let before = start.addingTimeInterval(86_400 - 300)
-        XCTAssertTrue(history.record(window(9, reset: reset), at: before, now: before))
-        // The Mac slept for six hours past the boundary: nothing says when the 11 points were spent.
-        let wake = start.addingTimeInterval(86_400 + 6 * 3600)
-        XCTAssertTrue(history.record(window(20, reset: reset), at: wake, now: wake))
-        let days = history.days(for: window(20, reset: reset))
-        XCTAssertEqual(days[0].complete, false)
-        XCTAssertFalse(days[1].exact)
-        XCTAssertEqual(days[1].baseline, 20)
-        XCTAssertEqual(days[1].used, 0)
-    }
-
-    func testEarlierUsageIsConservedAcrossPartialAndMissingDays() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        let now = start.addingTimeInterval(3 * 86_400 + 3600)
-        let pace = try XCTUnwrap(window(30, reset: reset).dayPace(at: now))
-        func entry(_ day: Int, baseline: Double, latest: Double, complete: Bool?) -> CycleDay {
-            let begin = start.addingTimeInterval(Double(day) * 86_400)
-            return CycleDay(day: day, start: begin, since: begin, baseline: baseline, latest: latest,
-                            allowance: 14, complete: complete)
-        }
-        // Day 1 exact (5), day 2 seen only in part (9 recorded), then today starts at 30.
-        let days = [entry(0, baseline: 0, latest: 5, complete: true),
-                    entry(1, baseline: 5, latest: 14, complete: false),
-                    entry(3, baseline: 30, latest: 30, complete: nil)]
-        let cells = DayPaceBar.layout(pace: pace, days: days, percent: 30)
-        var drawn = 0.0
-        for case .day(let day) in cells.prefix(3) { drawn += day.used }
-        for case .earlier(let amount, _, _) in cells { drawn += amount }
-        XCTAssertEqual(drawn, 30, accuracy: 0.001)
-        XCTAssertEqual(cells[0], .day(days[0]))
-        XCTAssertEqual(cells[3], .day(days[2]))
-        XCTAssertEqual(cells[4], .empty)
-    }
-
-    func testOverspendOnAnIncompleteDayStaysAmberAndNoUsageIsDropped() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        let now = start.addingTimeInterval(86_400 + 6 * 3600)
-        let pace = try XCTUnwrap(window(20, reset: reset).dayPace(at: now))
-        // 20% recorded late on day 1, then the Mac slept into day 2 with the counter still at 20%.
-        let first = CycleDay(day: 0, start: start, since: start, baseline: 0, latest: 20,
-                             allowance: 100.0 / 7, complete: false)
-        let second = CycleDay(day: 1, start: pace.dayStart, since: now, baseline: 20, latest: 20,
-                              allowance: 80.0 / 6)
-        let cells = DayPaceBar.layout(pace: pace, days: [first, second], percent: 20)
-        XCTAssertEqual(cells[0], .earlier(amount: 20, allowance: 100.0 / 7, proven: 20))
-        XCTAssertTrue(cells[0].over)
-        XCTAssertEqual(cells[0].fraction, 1)
-        XCTAssertEqual(cells[1], .day(second))
-    }
-
-    func testUnmeasuredEarlierUsageNeverLooksLikeAnOverspend() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        let now = start.addingTimeInterval(86_400 + 23 * 3600)
-        let pace = try XCTUnwrap(window(16, reset: reset).dayPace(at: now))
-        // Tracking began late on day 2 with 15% already used: day 1 plus most of day 2 are unknown.
-        let today = CycleDay(day: 1, start: pace.dayStart, since: now, baseline: 15, latest: 16,
-                             allowance: 85.0 / 6)
-        let cells = DayPaceBar.layout(pace: pace, days: [today], percent: 16)
-        XCTAssertEqual(cells[0], .earlier(amount: 15, allowance: 100.0 / 7, proven: 0))
-        XCTAssertFalse(cells[0].over)
-        XCTAssertEqual(cells[0].fraction, 1)
-    }
-
-    func testOverspendingIsFlaggedAndNewCycleClearsDays() throws {
-        let reset = start.addingTimeInterval(7 * 86_400)
-        var history = UsageHistory()
-        XCTAssertTrue(history.record(window(20, reset: reset), at: start.addingTimeInterval(3600), now: start.addingTimeInterval(3600)))
-        XCTAssertTrue(try XCTUnwrap(history.days(for: window(20, reset: reset)).last).over)
-        let next = reset.addingTimeInterval(3600)
-        XCTAssertTrue(history.record(window(1, reset: reset.addingTimeInterval(7 * 86_400)), at: next, now: next))
-        XCTAssertEqual(history.days(for: window(1, reset: reset.addingTimeInterval(7 * 86_400))).map(\.day), [0])
-        XCTAssertTrue(history.days(for: window(20, reset: reset)).isEmpty)
-    }
-
-    func testDayPaceNeedsAMultiDayWindowBeforeItsReset() {
-        let reset = start.addingTimeInterval(5 * 3600)
-        XCTAssertNil(UsageWindow(id: "s", label: "Session", percent: 10, resetsAt: reset, duration: 5 * 3600).dayPace(at: start))
-        XCTAssertNil(UsageWindow(id: "w", label: "Week", percent: 10, resetsAt: nil, duration: 7 * 86_400).dayPace(at: start))
-        XCTAssertNil(window(10, reset: start).dayPace(at: start))
-        XCTAssertNil(window(10, reset: start.addingTimeInterval(9 * 86_400)).dayPace(at: start))
+    func testDayCountNeedsAMultiDayWindow() {
+        XCTAssertNil(UsageWindow(id: "s", label: "Session", percent: 10, resetsAt: start, duration: 5 * 3600).dayCount)
+        XCTAssertNil(UsageWindow(id: "d", label: "Day", percent: 10, resetsAt: start, duration: 86_400).dayCount)
+        XCTAssertEqual(window(10, reset: start).dayCount, 7)
+        XCTAssertEqual(UsageWindow(id: "m", label: "Month", percent: 10, resetsAt: start, duration: 30 * 86_400).dayCount, 30)
     }
 
     @MainActor

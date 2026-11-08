@@ -261,8 +261,6 @@ private struct ProviderUsageBlock: View {
                         forecast: agents.usageHistory.forecast(provider: provider == .opencode ? OpenCodeGoPlan.planID : provider.rawValue,
                             plan: provider == .opencode ? agents.plans.openCodeGo?.plan : usage.plan, window: window, at: context.date),
                         breakdown: window.label == "Week" ? usage.breakdown : [],
-                        days: agents.usageHistory.days(provider: provider == .opencode ? OpenCodeGoPlan.planID : provider.rawValue,
-                            plan: provider == .opencode ? agents.plans.openCodeGo?.plan : usage.plan, window: window),
                         showsRemaining: isGo ? preferences.planUsageShowsRemaining : nil)
                 }
             }
@@ -325,7 +323,6 @@ private struct PlanUsageBlock: View {
                     UsageWindowRow(window: window, tint: usage.tint, now: context.date,
                         updatedAt: usage.updatedAt, isReady: usage.state == .ready,
                         forecast: agents.usageHistory.forecast(provider: usage.id, plan: usage.plan, window: window, at: context.date),
-                        days: agents.usageHistory.days(provider: usage.id, plan: usage.plan, window: window),
                         showsRemaining: preferences.planUsageShowsRemaining)
                 }
             }
@@ -359,7 +356,6 @@ private struct UsageWindowRow: View {
     let isReady: Bool
     let forecast: UsageForecast?
     var breakdown: [UsageShare] = []
-    var days: [CycleDay] = []
     /// Overrides the global reading for "Other plans" rows: nil uses the Claude Code setting.
     var showsRemaining: Bool? = nil
     @EnvironmentObject private var preferences: Preferences
@@ -401,22 +397,20 @@ private struct UsageWindowRow: View {
                     .multilineTextAlignment(.trailing)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let pace = window.dayPace(at: now) {
-                // Day 1 starts at zero, so it never needs a recorded baseline.
-                let today = fresh ? days.last { $0.day == pace.day } ?? (pace.day == 0 ? CycleDay(day: 0,
-                    start: pace.dayStart, since: pace.dayStart, baseline: 0, latest: window.percent,
-                    allowance: 100 / Double(pace.days)) : nil) : nil
-                DayPaceBar(pace: pace, days: days.contains { $0.day == pace.day } ? days : days + (today.map { [$0] } ?? []), percent: window.percent, tint: color, live: fresh)
+            if let days = window.dayCount {
+                let elapsed = fresh ? window.resetsAt.flatMap { $0 > now ? window.elapsedFraction(at: now) : nil } : nil
+                DayCellBar(percent: window.percent, days: days, tint: color, elapsed: elapsed)
                 if fresh {
                     HStack(spacing: 6) {
-                        Text(today.map { Self.todayText($0, now: now) } ?? "Today · from the next reading")
-                            .foregroundStyle(today?.over == true ? Theme.Accent.warning : Theme.Palette.textPrimary)
+                        if let elapsed {
+                            let ahead = window.percent - elapsed * 100
+                            Text("Day \(min(days, Int(elapsed * Double(days)) + 1)) of \(days) · \(Self.paceText(ahead))")
+                                .foregroundStyle(ahead > 0.05 ? Theme.Accent.warning : Theme.Palette.textPrimary)
+                        }
                         Spacer(minLength: 4)
                         if showPace {
                             Text(forecastText)
                                 .foregroundStyle(estimate?.exhaustion == nil ? Theme.Palette.textSecondary : Theme.Accent.warning)
-                        } else {
-                            Text("until \(Formatting.resetTime(pace.dayEnd, now: now))")
                         }
                     }
                     .lineLimit(1)
@@ -442,23 +436,17 @@ private struct UsageWindowRow: View {
         .accessibilityLabel(helpText)
     }
 
-    /// Today's own consumption against today's allowance, never the running weekly total.
-    static func todayText(_ day: CycleDay, now: Date) -> String {
-        let label = day.exact ? "Today" : "Since \(day.since.formatted(date: .omitted, time: .shortened))"
-        return "\(label) \(Formatting.percent(day.used)) of \(Formatting.percent(day.allowance))"
+    /// Distance between usage and an even spread over the cycle so far; positive means ahead of it.
+    static func paceText(_ ahead: Double) -> String {
+        abs(ahead) < 0.05 ? "on pace"
+            : ahead > 0 ? "\(Formatting.percent(ahead)) over pace" : "\(Formatting.percent(-ahead)) under pace"
     }
 
     private var helpText: String {
         var lines = ["\(window.label): \(Int(100 - window.percent))% left (\(Int(window.percent))% used)"]
         if let reset = window.resetsAt { lines.append("Resets \(reset.formatted(date: .abbreviated, time: .shortened))") }
-        if let pace = window.dayPace(at: now) {
-            lines.append("Each segment is one day of this \(pace.days)-day cycle. Days start at the reset time, not at midnight; today runs until \(pace.dayEnd.formatted(date: .abbreviated, time: .shortened)).")
-            lines.append("A segment fills with that day's usage against that day's allowance: the quota left when the day began divided by the days left, so unused quota raises later allowances and overspending lowers them. Amber means the day went over. Earlier usage fills the past days in order from the reset; empty segments are days ahead.")
-            for day in days {
-                let total = day.complete == true || day.day == pace.day ? "" : " (at least; the end of this day was not observed)"
-                let start = day.exact ? "" : " since \(day.since.formatted(date: .abbreviated, time: .shortened))"
-                lines.append("Day \(day.day + 1)\(start): \(Formatting.percent(day.used)) of \(Formatting.percent(day.allowance))\(total)")
-            }
+        if let days = window.dayCount {
+            lines.append("The bar runs from 0 to 100% of the quota used, cut into \(days) cells, one per day of this cycle (about \(Formatting.percent(100 / Double(days))) each). Usage fills from the left. The white tick marks where the cycle is in time, counted from the reset: fill short of it is under pace, fill past it is ahead.")
         }
         if showPace && (window.duration ?? 0) >= 86_400 {
             lines.append(forecastText)
