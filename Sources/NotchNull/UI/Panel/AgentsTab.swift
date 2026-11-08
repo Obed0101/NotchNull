@@ -378,6 +378,18 @@ private struct UsageWindowRow: View {
         return "Learning your hours"
     }
 
+    /// How far through the cycle it is, only while the reading is fresh and the reset is still ahead.
+    private var elapsed: Double? {
+        fresh ? window.resetsAt.flatMap { $0 > now ? window.elapsedFraction(at: now) : nil } : nil
+    }
+
+    /// The visible pace line, shared with the accessibility text so both always agree.
+    private var paceLine: (text: String, ahead: Double)? {
+        guard let days = window.dayCount, let elapsed else { return nil }
+        let ahead = window.percent - elapsed * 100
+        return ("Day \(min(days, Int(elapsed * Double(days)) + 1)) of \(days) · \(Self.paceText(ahead))", ahead)
+    }
+
     var body: some View {
         let color: Color = switch window.severity {
         case .critical: Theme.Accent.danger
@@ -398,14 +410,12 @@ private struct UsageWindowRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let days = window.dayCount {
-                let elapsed = fresh ? window.resetsAt.flatMap { $0 > now ? window.elapsedFraction(at: now) : nil } : nil
                 DayCellBar(percent: window.percent, days: days, tint: color, elapsed: elapsed)
                 if fresh {
                     HStack(spacing: 6) {
-                        if let elapsed {
-                            let ahead = window.percent - elapsed * 100
-                            Text("Day \(min(days, Int(elapsed * Double(days)) + 1)) of \(days) · \(Self.paceText(ahead))")
-                                .foregroundStyle(ahead > 0.05 ? Theme.Accent.warning : Theme.Palette.textPrimary)
+                        if let pace = paceLine {
+                            Text(pace.text)
+                                .foregroundStyle(pace.ahead > 0.05 ? Theme.Accent.warning : Theme.Palette.textPrimary)
                         }
                         Spacer(minLength: 4)
                         if showPace {
@@ -445,6 +455,7 @@ private struct UsageWindowRow: View {
     private var helpText: String {
         var lines = ["\(window.label): \(Int(100 - window.percent))% left (\(Int(window.percent))% used)"]
         if let reset = window.resetsAt { lines.append("Resets \(reset.formatted(date: .abbreviated, time: .shortened))") }
+        if let pace = paceLine { lines.append(pace.text) }
         if let days = window.dayCount {
             lines.append("The bar runs from 0 to 100% of the quota used, cut into \(days) cells, one per day of this cycle (about \(Formatting.percent(100 / Double(days))) each). Usage fills from the left. The white tick marks where the cycle is in time, counted from the reset: fill short of it is under pace, fill past it is ahead.")
         }
