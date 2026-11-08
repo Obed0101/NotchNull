@@ -51,6 +51,44 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(days[1].allowance, 85.0 / 6, accuracy: 0.001)
     }
 
+    func testBoundaryBaselineNeedsReadingsOnBothSidesOfTheBoundary() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        var history = UsageHistory()
+        let before = start.addingTimeInterval(86_400 - 300)
+        XCTAssertTrue(history.record(window(9, reset: reset), at: before, now: before))
+        // The Mac slept for six hours past the boundary: nothing says when the 11 points were spent.
+        let wake = start.addingTimeInterval(86_400 + 6 * 3600)
+        XCTAssertTrue(history.record(window(20, reset: reset), at: wake, now: wake))
+        let days = history.days(for: window(20, reset: reset))
+        XCTAssertEqual(days[0].complete, false)
+        XCTAssertFalse(days[1].exact)
+        XCTAssertEqual(days[1].baseline, 20)
+        XCTAssertEqual(days[1].used, 0)
+    }
+
+    func testEarlierUsageIsConservedAcrossPartialAndMissingDays() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        let now = start.addingTimeInterval(3 * 86_400 + 3600)
+        let pace = try XCTUnwrap(window(30, reset: reset).dayPace(at: now))
+        func entry(_ day: Int, baseline: Double, latest: Double, complete: Bool?) -> CycleDay {
+            let begin = start.addingTimeInterval(Double(day) * 86_400)
+            return CycleDay(day: day, start: begin, since: begin, baseline: baseline, latest: latest,
+                            allowance: 14, complete: complete)
+        }
+        // Day 1 exact (5), day 2 seen only in part (9 recorded), then today starts at 30.
+        let days = [entry(0, baseline: 0, latest: 5, complete: true),
+                    entry(1, baseline: 5, latest: 14, complete: false),
+                    entry(3, baseline: 30, latest: 30, complete: nil)]
+        let cells = DayPaceBar.layout(pace: pace, days: days, percent: 30)
+        var drawn = 0.0
+        for case .day(let day) in cells.prefix(3) { drawn += day.used }
+        for case .earlier(let fill) in cells { drawn += fill * 100 / 7 }
+        XCTAssertEqual(drawn, 30, accuracy: 0.001)
+        XCTAssertEqual(cells[0], .day(days[0]))
+        XCTAssertEqual(cells[3], .day(days[2]))
+        XCTAssertEqual(cells[4], .empty)
+    }
+
     func testOverspendingIsFlaggedAndNewCycleClearsDays() throws {
         let reset = start.addingTimeInterval(7 * 86_400)
         var history = UsageHistory()

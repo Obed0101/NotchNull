@@ -63,8 +63,8 @@ struct UsageHistory: Codable, Equatable {
     }
 
     /// Today's consumption needs the counter at the start of the cycle day. Day 1 starts at zero by
-    /// definition; later days use a reading taken shortly before the boundary, or else start at the
-    /// first observation and say so, instead of inventing usage while the Mac was off.
+    /// definition; later days need two consecutive readings (at most 20 minutes apart) that straddle the
+    /// boundary, or else start at the first observation and say so, instead of inventing usage while the Mac was off.
     private mutating func recordDay(_ window: UsageWindow, at date: Date, previous: Reading?) {
         guard let reset = window.resetsAt, let pace = window.dayPace(at: date) else { return }
         if cycleReset.map({ abs($0.timeIntervalSince(reset)) >= 60 }) ?? true {
@@ -84,14 +84,14 @@ struct UsageHistory: Codable, Equatable {
         if pace.day == 0 {
             (baseline, since) = (0, pace.dayStart)
         } else if let previous, abs(previous.reset.timeIntervalSince(reset)) < 60,
-                  previous.date <= pace.dayStart, pace.dayStart.timeIntervalSince(previous.date) <= 1200,
+                  previous.date <= pace.dayStart, date.timeIntervalSince(previous.date) <= 1200,
                   window.percent >= previous.percent {
             (baseline, since) = (previous.percent, pace.dayStart)
         } else {
             (baseline, since) = (window.percent, date)
         }
         if let index = days.indices.last, days[index].day == pace.day - 1 {
-            days[index].complete = since == pace.dayStart
+            days[index].complete = since == pace.dayStart && days[index].exact
         }
         let allowance = max(0, 100 - baseline) / Double(pace.days - pace.day)
         days.append(CycleDay(day: pace.day, start: pace.dayStart, since: since,
@@ -201,7 +201,7 @@ struct CycleDay: Codable, Equatable {
     /// Quota left at the start of the day divided by the days left, so savings and overspending
     /// carry into later days. Fixed for the whole day.
     var allowance: Double
-    /// Whether the next day began with a known boundary, so this day's total is exact.
+    /// Whether this day began and ended at known counter values, so its total is exact.
     var complete: Bool? = nil
 
     var used: Double { latest - baseline }
