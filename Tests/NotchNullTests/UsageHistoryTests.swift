@@ -86,15 +86,11 @@ final class UsageHistoryTests: XCTestCase {
         ]
         try JSONEncoder().encode([key: history]).write(to: url)
         let store = UsageHistoryStore(url: url, now: now, scheduleCleanup: false)
-        let loaded = expectation(description: "startup cleanup persisted")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { loaded.fulfill() }
-        wait(for: [loaded], timeout: 2)
+        store.waitForPendingWrites()
         let saved = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
         XCTAssertEqual(saved[key]?.intervals.count, 1)
         store.cleanup(at: now.addingTimeInterval(2 * 86_400))
-        let cleaned = expectation(description: "periodic cleanup persisted")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { cleaned.fulfill() }
-        wait(for: [cleaned], timeout: 2)
+        store.waitForPendingWrites()
         let later = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
         XCTAssertTrue(try XCTUnwrap(later[key]).intervals.isEmpty)
     }

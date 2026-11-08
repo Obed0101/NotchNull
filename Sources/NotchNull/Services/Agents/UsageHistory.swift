@@ -1,14 +1,14 @@
 import Foundation
 
 /// Quota deltas, not tokens: cache and model pricing make token totals unsuitable for budgeting.
-struct UsageHistory: Codable {
-    struct Reading: Codable {
+struct UsageHistory: Codable, Equatable {
+    struct Reading: Codable, Equatable {
         var date: Date
         var percent: Double
         var reset: Date
         var duration: TimeInterval
     }
-    struct Interval: Codable {
+    struct Interval: Codable, Equatable {
         var start: Date
         var end: Date
         var used: Double
@@ -127,16 +127,25 @@ final class UsageHistoryStore {
     private let url: URL?
     private let writer = DispatchQueue(label: "NotchNull.usage-history", qos: .utility)
     private var cleanupTimer: Timer?
+    private let scheduleCleanup: Bool
 
     init(url: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
         .appendingPathComponent("NotchNull/usage-history.json"), now: Date = Date(), scheduleCleanup: Bool = true) {
         self.url = url
+        self.scheduleCleanup = scheduleCleanup
         if let url, let data = try? Data(contentsOf: url),
            let saved = try? JSONDecoder().decode([String: UsageHistory].self, from: data) {
             histories = saved
             cleanup(at: now)
         }
-        if scheduleCleanup {
+        updateCleanupTimer()
+    }
+
+    private func updateCleanupTimer() {
+        if histories.isEmpty {
+            cleanupTimer?.invalidate()
+            cleanupTimer = nil
+        } else if scheduleCleanup && cleanupTimer == nil {
             cleanupTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.cleanup(at: Date()) }
             }
@@ -163,6 +172,7 @@ final class UsageHistoryStore {
         }
         guard changed else { return }
         pruneAll(at: now)
+        updateCleanupTimer()
         persist()
     }
 
@@ -172,9 +182,13 @@ final class UsageHistoryStore {
     }
 
     func cleanup(at now: Date) {
+        let previous = histories
         pruneAll(at: now)
-        persist()
+        updateCleanupTimer()
+        if histories != previous { persist() }
     }
+
+    func waitForPendingWrites() { writer.sync {} }
 
     private func persist() {
         guard let url else { return }
