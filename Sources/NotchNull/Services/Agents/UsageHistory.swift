@@ -28,7 +28,7 @@ struct UsageHistory: Codable {
             // Never spread a long offline gap across presumed working hours or bridge a reset.
             let gap = date.timeIntervalSince(previous.date)
             if previous.duration == duration, abs(previous.reset.timeIntervalSince(reset)) < 60,
-               gap <= 3600, window.percent >= previous.percent {
+               gap <= 3600, window.percent >= previous.percent, window.percent < 100 {
                 let used = window.percent - previous.percent
                 // Coalesce same-hour samples, so frequent log publications cannot grow the file
                 // or forecast work without bound. Keep local-hour boundaries for the model.
@@ -46,8 +46,14 @@ struct UsageHistory: Codable {
             }
         }
         last = reading
-        intervals.removeAll { $0.end < now.addingTimeInterval(-28 * 86_400) }
+        prune(at: now)
         return true
+    }
+
+    mutating func prune(at now: Date) {
+        let cutoff = now.addingTimeInterval(-28 * 86_400)
+        // Drop whole overlapping intervals rather than retain observations older than the cutoff.
+        intervals.removeAll { $0.start < cutoff }
     }
 
     /// Each local hour needs three hours of actual observations on at least three dates.
@@ -120,15 +126,24 @@ final class UsageHistoryStore {
     private var histories: [String: UsageHistory] = [:]
     private let url: URL?
     private let writer = DispatchQueue(label: "NotchNull.usage-history", qos: .utility)
+    private var cleanupTimer: Timer?
 
     init(url: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-        .appendingPathComponent("NotchNull/usage-history.json")) {
+        .appendingPathComponent("NotchNull/usage-history.json"), now: Date = Date(), scheduleCleanup: Bool = true) {
         self.url = url
         if let url, let data = try? Data(contentsOf: url),
            let saved = try? JSONDecoder().decode([String: UsageHistory].self, from: data) {
-            histories = saved.filter { $0.value.last.map { Date().timeIntervalSince($0.date) <= 28 * 86_400 } ?? false }
+            histories = saved
+            cleanup(at: now)
+        }
+        if scheduleCleanup {
+            cleanupTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.cleanup(at: Date()) }
+            }
         }
     }
+
+    deinit { cleanupTimer?.invalidate() }
 
     static func key(provider: String, plan: String?, window: UsageWindow) -> String {
         // JSON encoding avoids delimiter collisions without storing account identifiers.
@@ -147,7 +162,21 @@ final class UsageHistoryStore {
             }
         }
         guard changed else { return }
+        pruneAll(at: now)
+        persist()
+    }
+
+    private func pruneAll(at now: Date) {
         histories = histories.filter { $0.value.last.map { now.timeIntervalSince($0.date) <= 28 * 86_400 } ?? false }
+        for key in Array(histories.keys) { histories[key]?.prune(at: now) }
+    }
+
+    func cleanup(at now: Date) {
+        pruneAll(at: now)
+        persist()
+    }
+
+    private func persist() {
         guard let url else { return }
         let snapshot = histories
         writer.async {

@@ -56,6 +56,49 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertTrue(history.intervals.isEmpty)
     }
 
+    func testExhaustedIntervalsDoNotCountAsObservedInactivity() {
+        var history = UsageHistory()
+        let reset = start.addingTimeInterval(7 * 86_400)
+        for (index, percent) in [99.0, 100, 100, 100].enumerated() {
+            let date = start.addingTimeInterval(Double(index) * 600)
+            XCTAssertTrue(history.record(window(percent, reset: reset), at: date, now: date))
+        }
+        XCTAssertTrue(history.intervals.isEmpty)
+        let next = reset.addingTimeInterval(60)
+        XCTAssertTrue(history.record(window(1, reset: reset.addingTimeInterval(7 * 86_400)), at: next, now: next))
+        XCTAssertTrue(history.intervals.isEmpty)
+    }
+
+    @MainActor
+    func testStartupAndPeriodicCleanupPruneInactiveHistoriesOnDisk() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("history.json")
+        let now = Date()
+        let week = window(1, reset: now.addingTimeInterval(86_400))
+        let key = UsageHistoryStore.key(provider: "claude", plan: nil, window: week)
+        var history = UsageHistory()
+        history.last = .init(date: now.addingTimeInterval(-86_400), percent: 1, reset: now.addingTimeInterval(86_400), duration: 7 * 86_400)
+        history.intervals = [
+            .init(start: now.addingTimeInterval(-29 * 86_400), end: now.addingTimeInterval(-29 * 86_400 + 600), used: 1),
+            .init(start: now.addingTimeInterval(-27 * 86_400), end: now.addingTimeInterval(-27 * 86_400 + 600), used: 2)
+        ]
+        try JSONEncoder().encode([key: history]).write(to: url)
+        let store = UsageHistoryStore(url: url, now: now, scheduleCleanup: false)
+        let loaded = expectation(description: "startup cleanup persisted")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { loaded.fulfill() }
+        wait(for: [loaded], timeout: 2)
+        let saved = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
+        XCTAssertEqual(saved[key]?.intervals.count, 1)
+        store.cleanup(at: now.addingTimeInterval(2 * 86_400))
+        let cleaned = expectation(description: "periodic cleanup persisted")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { cleaned.fulfill() }
+        wait(for: [cleaned], timeout: 2)
+        let later = try JSONDecoder().decode([String: UsageHistory].self, from: Data(contentsOf: url))
+        XCTAssertTrue(try XCTUnwrap(later[key]).intervals.isEmpty)
+    }
+
     private func learnedHistory() -> (UsageHistory, Date, Date) {
         var history = UsageHistory()
         let reset = start.addingTimeInterval(7 * 86_400)
