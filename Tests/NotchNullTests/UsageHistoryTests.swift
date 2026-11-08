@@ -82,7 +82,7 @@ final class UsageHistoryTests: XCTestCase {
         let cells = DayPaceBar.layout(pace: pace, days: days, percent: 30)
         var drawn = 0.0
         for case .day(let day) in cells.prefix(3) { drawn += day.used }
-        for case .earlier(let amount, _) in cells { drawn += amount }
+        for case .earlier(let amount, _, _) in cells { drawn += amount }
         XCTAssertEqual(drawn, 30, accuracy: 0.001)
         XCTAssertEqual(cells[0], .day(days[0]))
         XCTAssertEqual(cells[3], .day(days[2]))
@@ -99,10 +99,23 @@ final class UsageHistoryTests: XCTestCase {
         let second = CycleDay(day: 1, start: pace.dayStart, since: now, baseline: 20, latest: 20,
                               allowance: 80.0 / 6)
         let cells = DayPaceBar.layout(pace: pace, days: [first, second], percent: 20)
-        XCTAssertEqual(cells[0], .earlier(amount: 20, allowance: 100.0 / 7))
+        XCTAssertEqual(cells[0], .earlier(amount: 20, allowance: 100.0 / 7, proven: 20))
         XCTAssertTrue(cells[0].over)
         XCTAssertEqual(cells[0].fraction, 1)
         XCTAssertEqual(cells[1], .day(second))
+    }
+
+    func testUnmeasuredEarlierUsageNeverLooksLikeAnOverspend() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        let now = start.addingTimeInterval(86_400 + 23 * 3600)
+        let pace = try XCTUnwrap(window(16, reset: reset).dayPace(at: now))
+        // Tracking began late on day 2 with 15% already used: day 1 plus most of day 2 are unknown.
+        let today = CycleDay(day: 1, start: pace.dayStart, since: now, baseline: 15, latest: 16,
+                             allowance: 85.0 / 6)
+        let cells = DayPaceBar.layout(pace: pace, days: [today], percent: 16)
+        XCTAssertEqual(cells[0], .earlier(amount: 15, allowance: 100.0 / 7, proven: 0))
+        XCTAssertFalse(cells[0].over)
+        XCTAssertEqual(cells[0].fraction, 1)
     }
 
     func testOverspendingIsFlaggedAndNewCycleClearsDays() throws {
