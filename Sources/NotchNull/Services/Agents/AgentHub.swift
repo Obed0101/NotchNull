@@ -27,6 +27,7 @@ final class AgentHub: ObservableObject {
     @Published private(set) var opencodePluginError: String?
 
     private var server: AgentEventServer?
+    let usageHistory = UsageHistoryStore()
     private var cancellables: Set<AnyCancellable> = []
     private let installation: AgentInstallation
     private var activationThrottle = AgentAvailabilityRefreshThrottle()
@@ -58,6 +59,18 @@ final class AgentHub: ObservableObject {
             .sink { [weak self] _ in self?.opencode.refreshNow() }
             .store(in: &cancellables)
 
+        // Observe source publications even while the panel is closed; never poll providers again.
+        claudeUsage.$usage.merge(with: codex.$usage, opencode.$usage)
+            .sink { [weak self] usage in
+                self?.usageHistory.record(provider: usage.provider.rawValue, plan: usage.plan,
+                    windows: usage.windows, updatedAt: usage.updatedAt, state: usage.state)
+            }.store(in: &cancellables)
+        plans.$usages.sink { [weak self] usages in
+            for usage in usages {
+                self?.usageHistory.record(provider: usage.id, plan: usage.plan,
+                    windows: usage.windows, updatedAt: usage.updatedAt, state: usage.state)
+            }
+        }.store(in: &cancellables)
         let warn: (String, UsageWindow) -> Void = { [weak self] provider, window in
             self?.warning = Warning(provider: provider, window: window)
             ActivityCenter.shared.post(.usageWarning, for: Constants.Durations.usageWarning)

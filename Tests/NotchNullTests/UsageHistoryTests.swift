@@ -1,0 +1,137 @@
+import XCTest
+@testable import NotchNull
+
+final class UsageHistoryTests: XCTestCase {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+    private let start = Date(timeIntervalSince1970: 1_800_057_600) // midnight UTC
+    private func window(_ used: Double, reset: Date) -> UsageWindow {
+        UsageWindow(id: "week", label: "Week", percent: used, resetsAt: reset, duration: 7 * 86_400)
+    }
+
+    func testFirstDayBudgetDoesNotExtrapolateBurst() throws {
+        let now = start.addingTimeInterval(10 * 3600)
+        let week = window(7, reset: start.addingTimeInterval(7 * 86_400))
+        XCTAssertEqual(try XCTUnwrap(week.dailyBudget(at: now)), 93 / (7 - 10.0 / 24), accuracy: 0.001)
+        var history = UsageHistory()
+        XCTAssertTrue(history.record(week, at: now, now: now))
+        XCTAssertNil(history.forecast(week, at: now, calendar: calendar))
+    }
+
+    func testBudgetAfterFullDayAndNearReset() throws {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        XCTAssertEqual(try XCTUnwrap(window(7, reset: reset).dailyBudget(at: start.addingTimeInterval(86_400))), 15.5)
+        XCTAssertEqual(window(93, reset: reset).dailyBudget(at: reset.addingTimeInterval(-3600)), 7)
+        XCTAssertNil(window(7, reset: reset).dailyBudget(at: reset))
+    }
+
+    func testDuplicateOldStaleFutureAndOfflineObservationsAreNotLearned() {
+        var history = UsageHistory()
+        let reset = start.addingTimeInterval(7 * 86_400)
+        let week = window(7, reset: reset)
+        XCTAssertTrue(history.record(week, at: start, now: start))
+        XCTAssertFalse(history.record(week, at: start, now: start))
+        XCTAssertFalse(history.record(week, at: start.addingTimeInterval(-1), now: start))
+        XCTAssertFalse(history.record(week, at: start.addingTimeInterval(1), now: start))
+        XCTAssertFalse(history.record(week, at: start.addingTimeInterval(60), now: start.addingTimeInterval(1800)))
+        let later = start.addingTimeInterval(7200)
+        XCTAssertTrue(history.record(window(9, reset: reset), at: later, now: later))
+        XCTAssertTrue(history.intervals.isEmpty)
+    }
+
+    func testResetDoesNotBecomeConsumptionAndCorrectionClearsLearning() {
+        var history = UsageHistory()
+        let reset = start.addingTimeInterval(3600)
+        XCTAssertTrue(history.record(window(90, reset: reset), at: start, now: start))
+        let next = reset.addingTimeInterval(60)
+        let nextReset = reset.addingTimeInterval(7 * 86_400)
+        XCTAssertTrue(history.record(window(2, reset: nextReset), at: next, now: next))
+        XCTAssertTrue(history.intervals.isEmpty)
+        XCTAssertTrue(history.record(window(3, reset: nextReset), at: next.addingTimeInterval(600), now: next.addingTimeInterval(600)))
+        XCTAssertEqual(history.intervals.count, 1)
+        XCTAssertTrue(history.record(window(1, reset: nextReset), at: next.addingTimeInterval(1200), now: next.addingTimeInterval(1200)))
+        XCTAssertTrue(history.intervals.isEmpty)
+    }
+
+    private func learnedHistory() -> (UsageHistory, Date, Date) {
+        var history = UsageHistory()
+        let reset = start.addingTimeInterval(7 * 86_400)
+        var used = 0.0
+        _ = history.record(window(used, reset: reset), at: start, now: start)
+        for hour in 0..<72 {
+            let date = start.addingTimeInterval(Double(hour) * 3600)
+            let localHour = calendar.component(.hour, from: date)
+            // Night quiet, work from 09:00 to 02:00, 17 points per day.
+            used += localHour >= 9 || localHour < 2 ? 1 : 0
+            let end = date.addingTimeInterval(3600)
+            _ = history.record(window(used, reset: reset), at: end, now: end)
+        }
+        return (history, start.addingTimeInterval(72 * 3600), reset)
+    }
+
+    func testLearnsWorkingHoursInsteadOfPredictingOvernightBurn() throws {
+        let (history, now, reset) = learnedHistory()
+        let rates = try XCTUnwrap(history.hourlyRates(calendar: calendar))
+        XCTAssertEqual(rates[6], 0)
+        XCTAssertEqual(rates[10], 1, accuracy: 0.001)
+        let forecast = try XCTUnwrap(history.forecast(window(51, reset: reset), at: now, calendar: calendar))
+        XCTAssertEqual(forecast.dailyUse, 17, accuracy: 0.001)
+        // 49 points left: two 17-point days, then 15 working hours, ending at 22:00.
+        let hit = try XCTUnwrap(forecast.exhaustion)
+        XCTAssertEqual(hit.timeIntervalSince(now), (48 + 22) * 3600, accuracy: 1)
+        XCTAssertNil(history.forecast(window(51, reset: reset), at: now.addingTimeInterval(1201), calendar: calendar))
+    }
+
+    func testMissingHoursAreUnknownAndPersistencePreservesModel() throws {
+        let (history, now, reset) = learnedHistory()
+        var sparse = history
+        sparse.intervals.removeAll { calendar.component(.hour, from: $0.start) == 6 }
+        XCTAssertNil(sparse.forecast(window(51, reset: reset), at: now, calendar: calendar))
+        let decoded = try JSONDecoder().decode(UsageHistory.self, from: JSONEncoder().encode(history))
+        XCTAssertEqual(decoded.forecast(window(51, reset: reset), at: now, calendar: calendar)?.dailyUse, 17)
+    }
+
+    func testNoExhaustionWhenHabitsFitRemainingQuota() throws {
+        var (history, now, reset) = learnedHistory()
+        history.last?.percent = 7
+        let forecast = try XCTUnwrap(history.forecast(window(7, reset: reset), at: now, calendar: calendar))
+        XCTAssertNil(forecast.exhaustion)
+        XCTAssertNil(history.forecast(window(100, reset: reset), at: now, calendar: calendar))
+    }
+
+    func testFrequentObservationsCoalesceWithoutLosingConsumption() throws {
+        var history = UsageHistory()
+        let reset = start.addingTimeInterval(7 * 86_400)
+        for second in 0...1800 {
+            let date = start.addingTimeInterval(Double(second))
+            _ = history.record(window(Double(second) / 1800, reset: reset), at: date, now: date)
+        }
+        XCTAssertLessThanOrEqual(history.intervals.count, 2)
+        XCTAssertEqual(history.intervals.reduce(0) { $0 + $1.used }, 1, accuracy: 0.0001)
+    }
+
+    func testOldHistoryExpiresInsteadOfInfluencingNewHabits() {
+        var (history, _, _) = learnedHistory()
+        let now = start.addingTimeInterval(40 * 86_400)
+        let week = window(7, reset: now.addingTimeInterval(6 * 86_400))
+        XCTAssertTrue(history.record(week, at: now, now: now))
+        XCTAssertTrue(history.intervals.isEmpty)
+        XCTAssertNil(history.forecast(week, at: now, calendar: calendar))
+    }
+
+    @MainActor
+    func testStoreSeparatesProvidersAndPlansAndRejectsUnavailableReadings() {
+        let store = UsageHistoryStore(url: nil)
+        let (_, now, reset) = learnedHistory()
+        let week = window(51, reset: reset)
+        store.record(provider: "claude", plan: "Max", windows: [week], updatedAt: now, state: .unavailable("stale"), now: now)
+        XCTAssertNil(store.forecast(provider: "claude", plan: "Max", window: week, at: now))
+        XCTAssertNotEqual(UsageHistoryStore.key(provider: "claude", plan: "Max", window: week),
+                          UsageHistoryStore.key(provider: "codex", plan: "Max", window: week))
+        XCTAssertNotEqual(UsageHistoryStore.key(provider: "claude", plan: "Max", window: week),
+                          UsageHistoryStore.key(provider: "claude", plan: "Pro", window: week))
+    }
+}

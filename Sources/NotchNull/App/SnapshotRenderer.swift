@@ -66,6 +66,26 @@ enum SnapshotRenderer {
         preferences.panelWidth = 680
         preferences.panelHeight = 200
         render(large, geometry: geometry, services: services, to: directory)
+        // Weekly-only subscriptions, the common compact usage-budget layout.
+        let savedClaude = services.agents.claudeUsage.usage
+        let savedCodex = services.agents.codex.usage
+        let savedPlans = services.agents.plans.usages
+        var weeklyClaude = savedClaude
+        var weeklyCodex = savedCodex
+        weeklyClaude.windows.removeAll { ($0.duration ?? 0) < 86_400 }
+        weeklyCodex.windows.removeAll { ($0.duration ?? 0) < 86_400 }
+        services.agents.claudeUsage.preview(weeklyClaude)
+        services.agents.codex.preview(usage: weeklyCodex, tokens: services.agents.codex.tokens)
+        services.agents.plans.preview([])
+        render([("53-weekly-agents", .open, .agents)], geometry: geometry, services: services, to: directory)
+        preferences.panelWidth = 540
+        preferences.panelHeight = 172
+        render([("43-weekly-agents", .open, .agents)], geometry: geometry, services: services, to: directory)
+        services.agents.claudeUsage.preview(savedClaude)
+        services.agents.codex.preview(usage: savedCodex, tokens: services.agents.codex.tokens)
+        services.agents.plans.preview(savedPlans)
+        preferences.panelWidth = 680
+        preferences.panelHeight = 200
         renderHomeFits(geometry: geometry, services: services, to: directory)
         (preferences.panelWidth, preferences.panelHeight) = (saved.0, saved.1)
         preferences.closedExtraWidth = 90
