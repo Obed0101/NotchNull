@@ -69,6 +69,22 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertTrue(history.intervals.isEmpty)
     }
 
+    func testInterruptedRecoveryStillInvalidatesChangedScale() {
+        let reset = start.addingTimeInterval(7 * 86_400)
+        for changedDuration in [false, true] {
+            var history = UsageHistory()
+            XCTAssertTrue(history.record(window(10, reset: reset), at: start, now: start))
+            let second = start.addingTimeInterval(600)
+            XCTAssertTrue(history.record(window(11, reset: reset), at: second, now: second))
+            history.interrupted = true
+            let recovery = start.addingTimeInterval(1200)
+            let changed = UsageWindow(id: "week", label: "Week", percent: changedDuration ? 12 : 9,
+                                      resetsAt: reset, duration: (changedDuration ? 8 : 7) * 86_400)
+            XCTAssertTrue(history.record(changed, at: recovery, now: recovery))
+            XCTAssertTrue(history.intervals.isEmpty)
+        }
+    }
+
     @MainActor
     func testStartupAndPeriodicCleanupPruneInactiveHistoriesOnDisk() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

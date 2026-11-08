@@ -24,11 +24,11 @@ struct UsageHistory: Codable, Equatable {
               reset > date, reset.timeIntervalSince(date) <= duration + 60,
               last.map({ date > $0.date }) ?? true else { return false }
         let reading = Reading(date: date, percent: window.percent, reset: reset, duration: duration)
-        if let previous = last, interrupted != true {
+        if let previous = last {
             if previous.duration != duration { intervals = [] }
             // Never spread a long offline gap across presumed working hours or bridge a reset.
             let gap = date.timeIntervalSince(previous.date)
-            if previous.duration == duration, abs(previous.reset.timeIntervalSince(reset)) < 60,
+            if interrupted != true, previous.duration == duration, abs(previous.reset.timeIntervalSince(reset)) < 60,
                gap <= 3600, window.percent >= previous.percent, window.percent < 100 {
                 let used = window.percent - previous.percent
                 // Coalesce same-hour samples, so frequent log publications cannot grow the file
