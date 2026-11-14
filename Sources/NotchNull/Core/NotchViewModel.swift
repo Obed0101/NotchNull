@@ -47,7 +47,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Why a fullscreen-concealed notch is currently showing.
-    enum RevealReason: String {
+    enum RevealReason: String, Equatable {
         case activity, hover, open
     }
 
@@ -552,7 +552,11 @@ final class NotchViewModel: ObservableObject {
         if inside {
             closeWork?.cancel()
             guard !isOpen else { return inside }
-            if case .activity(let kind) = phase, kind.layout.interactive { return inside }
+            // The wake strip is the notch's own access affordance. Hovering it must open the
+            // panel even when the activity below has its own controls (meeting, needs-you,
+            // download prompt); the interactive guard only applies to those controls.
+            let fromWakeStrip = isFullscreenActive && wakeStripRect.contains(point)
+            if !fromWakeStrip, case .activity(let kind) = phase, kind.layout.interactive { return inside }
             if isFullscreenActive {
                 // Fullscreen deliberately opens on hover even when the general trigger is click.
                 schedule(&openWork, after: max(Motion.hoverOpenDelay, Constants.Intervals.fullscreenHoverOpenDelay)) {

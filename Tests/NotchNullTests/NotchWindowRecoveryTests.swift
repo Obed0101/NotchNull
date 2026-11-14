@@ -9,13 +9,22 @@ final class NotchWindowRecoveryTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(60))
     }
 
+    private func waitUntil(timeout: TimeInterval = 1, _ condition: @escaping @MainActor () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     private func withController(onWindowFailure: (() -> Void)? = nil,
+        onConcealmentChange: (@MainActor () -> Void)? = nil,
         _ check: (NotchWindowController, NotchPanel) async -> Void) async throws {
         _ = NSApplication.shared
         guard let screen = NSScreen.screens.first else { throw XCTSkip("Requires a display") }
         let existing = Set(NSApp.windows.map(ObjectIdentifier.init))
         let services = AppServices() // Do not start services or request permissions.
-        let controller = NotchWindowController(screen: screen, services: services, onWindowFailure: onWindowFailure)
+        let controller = NotchWindowController(screen: screen, services: services,
+            onWindowFailure: onWindowFailure, onConcealmentChange: onConcealmentChange)
         defer { controller.tearDown() }
         let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? NotchPanel }
             .first { !existing.contains(ObjectIdentifier($0)) })
@@ -114,6 +123,24 @@ final class NotchWindowRecoveryTests: XCTestCase {
             status = controller.windowStatus.object ?? [:]
             XCTAssertEqual(status["fullscreen"]?.bool, false)
             XCTAssertEqual(status["concealed"]?.bool, false)
+        }
+    }
+
+    func testStatusCallbackTracksRevealReasonChanges() async throws {
+        var changes = 0
+        try await withController(onConcealmentChange: { changes += 1 }) { controller, _ in
+            await resetSharedActivities()
+            controller.setFullscreenActive(true)
+            await waitUntil { changes == 1 }
+            XCTAssertEqual(changes, 1)
+
+            controller.model.isPointerInside = true
+            await waitUntil { changes == 2 }
+            XCTAssertEqual(changes, 2)
+
+            controller.model.open()
+            await waitUntil { changes == 3 }
+            XCTAssertEqual(changes, 3)
         }
     }
 

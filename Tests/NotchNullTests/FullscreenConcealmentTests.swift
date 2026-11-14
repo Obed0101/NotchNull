@@ -36,6 +36,14 @@ final class FullscreenConcealmentTests: XCTestCase {
         try await check(id)
     }
 
+    /// Wait for a state transition instead of assuming a fixed sleep is enough under CI load.
+    private func waitUntil(timeout: TimeInterval = 3, _ condition: @escaping @MainActor () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     func testActivityFullscreenPresenceTable() {
         let alerts: Set<ActivityKind> = [
             .needsYou, .agentDone, .usageWarning, .timerFinished, .lowBattery,
@@ -133,6 +141,25 @@ final class FullscreenConcealmentTests: XCTestCase {
         }
     }
 
+    func testWakeStripHoverOpensWithHiddenInteractiveActivity() async {
+        let center = ActivityCenter()
+        center.setPersistent(.meetingSoon, active: true)
+        await withShapeAsync(.notch) { id in
+            let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
+            model.setFullscreenActive(true)
+            await waitUntil { model.phase == .activity(.meetingSoon) }
+            XCTAssertTrue(model.isConcealed)
+
+            let strip = model.wakeStripRect
+            XCTAssertTrue(model.pointerMoved(to: CGPoint(x: strip.midX, y: strip.midY)))
+            await waitUntil { model.phase == .open }
+            XCTAssertEqual(model.phase, .open)
+            XCTAssertFalse(model.isConcealed)
+            model.close()
+        }
+        center.setPersistent(.meetingSoon, active: false)
+    }
+
     func testConcealedDropProximityIsEmpty() {
         withShape(.notch) { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: ActivityCenter())
@@ -183,40 +210,59 @@ final class FullscreenConcealmentTests: XCTestCase {
         XCTAssertEqual(SettingsFile.shared.snapshot().value(at: "behavior.revealAlertsOnFullscreen")?.bool, false)
     }
 
-    func testTransientAlertRevealsThenConcealsOnExpiry() async {
+    func testTransientAlertRevealsAndConcealsWhenRemoved() async {
         let saved = Preferences.shared.revealAlertsOnFullscreen
         Preferences.shared.revealAlertsOnFullscreen = true
         defer { Preferences.shared.revealAlertsOnFullscreen = saved }
 
         let center = ActivityCenter()
-        center.post(.agentDone, for: 0.2)
         await withShapeAsync(.notch) { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
             model.setFullscreenActive(true)
-            try? await Task.sleep(for: .milliseconds(120))
+            center.post(.agentDone, for: 10)
+            await waitUntil { !model.isConcealed }
             XCTAssertFalse(model.isConcealed)
-            try? await Task.sleep(for: .milliseconds(350))
+
+            center.dismiss(.agentDone)
+            await waitUntil { model.isConcealed }
             XCTAssertTrue(model.isConcealed)
         }
         center.dismiss(.agentDone)
     }
 
-    func testAlertExpiryBehindAPersistentWinnerReconceals() async {
+    func testTransientAlertExpiryReconceals() async {
+        let saved = Preferences.shared.revealAlertsOnFullscreen
+        Preferences.shared.revealAlertsOnFullscreen = true
+        defer { Preferences.shared.revealAlertsOnFullscreen = saved }
+
+        let center = ActivityCenter()
+        await withShapeAsync(.notch) { id in
+            let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
+            model.setFullscreenActive(true)
+            center.post(.agentDone, for: 0.2)
+            await waitUntil(timeout: 3) { model.isConcealed }
+            XCTAssertTrue(model.isConcealed)
+        }
+        center.dismiss(.agentDone)
+    }
+
+    func testAlertRemovalBehindAPersistentWinnerReconceals() async {
         let saved = Preferences.shared.revealAlertsOnFullscreen
         Preferences.shared.revealAlertsOnFullscreen = true
         defer { Preferences.shared.revealAlertsOnFullscreen = saved }
 
         let center = ActivityCenter()
         center.setPersistent(.custom, active: true)
-        center.post(.agentDone, for: 0.2)
         await withShapeAsync(.notch) { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
             model.setFullscreenActive(true)
-            try? await Task.sleep(for: .milliseconds(120))
+            center.post(.agentDone, for: 10)
+            await waitUntil { !model.isConcealed }
             XCTAssertFalse(model.isConcealed)
             XCTAssertTrue(model.activityReveals)
 
-            try? await Task.sleep(for: .milliseconds(350))
+            center.dismiss(.agentDone)
+            await waitUntil { model.isConcealed }
             XCTAssertTrue(model.isConcealed)
             XCTAssertFalse(model.activityReveals)
         }

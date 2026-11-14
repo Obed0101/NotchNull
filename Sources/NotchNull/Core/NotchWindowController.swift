@@ -32,6 +32,7 @@ final class NotchWindowController {
     private var failedRestores = 0
     private var lastStatusConcealed = false
     private var lastStatusFullscreen = false
+    private var lastStatusReveal: NotchViewModel.RevealReason?
     private let onWindowFailure: (() -> Void)?
     private let onConcealmentChange: (@MainActor () -> Void)?
     var isFullscreenActive: Bool { fullscreenActive }
@@ -214,9 +215,11 @@ final class NotchWindowController {
         if model.isWindowVisible != visible { model.isWindowVisible = visible }
         clock.setActive(visible, consumer: clockConsumer)
         stats.setActive(visible && model.isHomeVisible && Preferences.shared.statsEnabled, consumer: statsConsumer)
-        if lastStatusConcealed != model.isConcealed || lastStatusFullscreen != fullscreenActive {
+        let reveal = model.revealReason
+        if lastStatusConcealed != model.isConcealed || lastStatusFullscreen != fullscreenActive || lastStatusReveal != reveal {
             lastStatusConcealed = model.isConcealed
             lastStatusFullscreen = fullscreenActive
+            lastStatusReveal = reveal
             // Do not call pointerMoved here: it could re-open a notch that just concealed.
             panel.ignoresMouseEvents = !model.interactiveRect.contains(NSEvent.mouseLocation)
             onConcealmentChange?()
