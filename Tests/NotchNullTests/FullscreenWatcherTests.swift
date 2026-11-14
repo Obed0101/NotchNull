@@ -38,6 +38,16 @@ final class FullscreenWatcherTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testScreenshotOverlayIsNotFullscreen() {
+        let overlay = FullscreenWindow(owner: "Screenshot", pid: 101, layer: 0, bounds: display0.bounds)
+        XCTAssertTrue(
+            FullscreenWatcher.fullscreenDisplayIDs(windows: [overlay], screens: [display0], ownPID: 999).isEmpty
+        )
+        XCTAssertTrue(
+            FullscreenWatcher.fullscreenDisplayIDs(windows: [overlay], screens: [notched], ownPID: 999).isEmpty
+        )
+    }
+
     func testNonzeroLayersAreIgnored() {
         let windows = [
             FullscreenWindow(owner: "Overlay", pid: 100, layer: 25, bounds: display0.bounds),
@@ -82,5 +92,89 @@ final class FullscreenWatcherTests: XCTestCase {
             FullscreenWindow(owner: "Safari", pid: 100, layer: 0, bounds: CGRect(x: 0, y: 30, width: 1920, height: 1050)),
         ]
         XCTAssertTrue(FullscreenWatcher.fullscreenDisplayIDs(windows: windows, screens: [display0], ownPID: 999).isEmpty)
+    }
+
+    func testBelowHousingDetectorIgnoresTemporaryMenuBarVisibility() {
+        let windows = [
+            menuBar,
+            FullscreenWindow(owner: "Safari", pid: 100, layer: 0, bounds: belowHousing),
+        ]
+        XCTAssertEqual(
+            FullscreenWatcher.belowHousingFullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999),
+            [notched.id]
+        )
+        // The strict matcher still refuses a below-housing window under a visible menu bar.
+        XCTAssertTrue(FullscreenWatcher.fullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999).isEmpty)
+    }
+
+    func testBelowHousingDetectorOnlyAppliesToNotchedDisplays() {
+        let windows = [
+            FullscreenWindow(owner: "Safari", pid: 100, layer: 0, bounds: display0.bounds),
+        ]
+        XCTAssertTrue(
+            FullscreenWatcher.belowHousingFullscreenDisplayIDs(windows: windows, screens: [display0], ownPID: 999).isEmpty
+        )
+    }
+
+    func testMenuBarGraceKeepsABriefRevealFullscreenThenExpires() {
+        var since: [CGDirectDisplayID: Date] = [:]
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        let windows = [
+            menuBar,
+            FullscreenWindow(owner: "Safari", pid: 100, layer: 0, bounds: belowHousing),
+        ]
+        let strict = FullscreenWatcher.fullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999)
+        let below = FullscreenWatcher.belowHousingFullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999)
+
+        let first = FullscreenWatcher.applyingMenuBarGrace(
+            strict: strict, belowHousing: below, previous: [notched.id], screens: [notched],
+            windows: windows, menuBarVisibleSince: &since, now: now, grace: 1.5
+        )
+        XCTAssertEqual(first, [notched.id])
+        XCTAssertNotNil(since[notched.id])
+
+        let brief = FullscreenWatcher.applyingMenuBarGrace(
+            strict: strict, belowHousing: below, previous: [notched.id], screens: [notched],
+            windows: windows, menuBarVisibleSince: &since, now: now.addingTimeInterval(1), grace: 1.5
+        )
+        XCTAssertEqual(brief, [notched.id])
+
+        let expired = FullscreenWatcher.applyingMenuBarGrace(
+            strict: strict, belowHousing: below, previous: [notched.id], screens: [notched],
+            windows: windows, menuBarVisibleSince: &since, now: now.addingTimeInterval(2), grace: 1.5
+        )
+        XCTAssertTrue(expired.isEmpty)
+    }
+
+    func testMenuBarGraceDoesNotInventFullscreen() {
+        var since: [CGDirectDisplayID: Date] = [:]
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        let windows = [
+            menuBar,
+            FullscreenWindow(owner: "Safari", pid: 100, layer: 0, bounds: belowHousing),
+        ]
+        let strict = FullscreenWatcher.fullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999)
+        let below = FullscreenWatcher.belowHousingFullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999)
+        let result = FullscreenWatcher.applyingMenuBarGrace(
+            strict: strict, belowHousing: below, previous: [], screens: [notched],
+            windows: windows, menuBarVisibleSince: &since, now: now, grace: 1.5
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testMenuBarGraceResetsWhenTheMenuBarHides() {
+        var since: [CGDirectDisplayID: Date] = [:]
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        let windows = [
+            FullscreenWindow(owner: "Safari", pid: 100, layer: 0, bounds: belowHousing),
+        ]
+        let strict = FullscreenWatcher.fullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999)
+        let below = FullscreenWatcher.belowHousingFullscreenDisplayIDs(windows: windows, screens: [notched], ownPID: 999)
+        let result = FullscreenWatcher.applyingMenuBarGrace(
+            strict: strict, belowHousing: below, previous: [notched.id], screens: [notched],
+            windows: windows, menuBarVisibleSince: &since, now: now, grace: 1.5
+        )
+        XCTAssertEqual(result, [notched.id])
+        XCTAssertTrue(since.isEmpty)
     }
 }

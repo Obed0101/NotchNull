@@ -74,12 +74,17 @@ Content that changes every frame MAY animate continuously only while it is visib
 
 ### Requirement: Hidden windows do no animation work
 
-A notch window that is not actually on screen MUST pause its timelines and repeating animations. This covers a window hidden for fullscreen, ordered out, on a sleeping display, or on a Space it does not inhabit.
+A notch window whose body is not visible MUST pause its timelines and repeating animations. This covers a body concealed for fullscreen, an ordered-out window, a sleeping display, or a Space it does not inhabit. A panel kept registered for a concealed body MUST NOT continue animation work.
 
 #### Scenario: Fullscreen hides the notch
 
 - **WHEN** a fullscreen app covers the display and the notch is hidden
 - **THEN** no notch animation or timeline advances until the notch returns
+
+#### Scenario: Concealed body in a registered window
+
+- **WHEN** the panel window remains registered while its body is concealed for fullscreen
+- **THEN** the clock, stats and repeating animations still do no work
 
 #### Scenario: Display sleeps
 

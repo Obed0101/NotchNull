@@ -6,17 +6,42 @@ struct NotchRootView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            NotchBodyView()
-                .padding(.top, model.bodyTop)
-                .frame(width: Theme.Size.canvas.width, height: Theme.Size.canvas.height, alignment: .top)
-            if let satellites = model.satelliteFrames {
-                IslandSatellite(side: .leading, frame: satellites.left)
-                IslandSatellite(side: .trailing, frame: satellites.right)
+            ZStack(alignment: .topLeading) {
+                NotchBodyView()
+                    .padding(.top, model.bodyTop)
+                    .frame(width: Theme.Size.canvas.width, height: Theme.Size.canvas.height, alignment: .top)
+                if let satellites = model.satelliteFrames {
+                    IslandSatellite(side: .leading, frame: satellites.left)
+                    IslandSatellite(side: .trailing, frame: satellites.right)
+                }
+            }
+            .offset(y: Motion.reduceMotion ? 0 : model.concealOffset)
+            .opacity(Motion.reduceMotion && model.isConcealed ? 0 : 1)
+            .accessibilityHidden(model.isConcealed)
+            .animation(Motion.isSnapshot ? nil : (model.isConcealed ? Motion.conceal : Motion.reveal), value: model.isConcealed)
+
+            if model.isFullscreenActive && !model.isExpanded {
+                WakeStrip()
             }
         }
         .frame(width: Theme.Size.canvas.width, height: Theme.Size.canvas.height, alignment: .topLeading)
         .animation(Motion.state, value: model.isIsland)
         .preferredColorScheme(.dark)
+    }
+}
+
+/// Transparent top-centre target that brings a concealed notch back while a fullscreen app
+/// covers the display. The pointer tracking is global; this view handles the click.
+private struct WakeStrip: View {
+    @EnvironmentObject private var model: NotchViewModel
+
+    var body: some View {
+        Color.clear
+            .frame(width: model.closedSize.width, height: Theme.Size.fullscreenWakeHeight)
+            .contentShape(Rectangle())
+            .onTapGesture { model.open() }
+            .frame(width: Theme.Size.canvas.width, height: Theme.Size.canvas.height, alignment: .top)
+            .accessibilityHidden(true)
     }
 }
 

@@ -221,8 +221,10 @@ final class Preferences: ObservableObject {
     @Published var planUsageShowsRemaining: Bool { didSet { save(planUsageShowsRemaining, Keys.planUsageShowsRemaining) } }
     /// Swipe left or right on the open panel background to move through tabs.
     @Published var tabSwipeEnabled: Bool { didSet { save(tabSwipeEnabled, Keys.tabSwipe) } }
-    /// Hide the notch on a display while a fullscreen app covers that display.
+    /// Slide the notch out of the way on a display while a fullscreen app covers it.
     @Published var hideOnFullscreen: Bool { didSet { save(hideOnFullscreen, Keys.hideOnFullscreen) } }
+    /// Slide the notch back down for attention activities while a fullscreen app covers it.
+    @Published var revealAlertsOnFullscreen: Bool { didSet { save(revealAlertsOnFullscreen, Keys.revealAlertsOnFullscreen) } }
     /// Ask GitHub once a day whether a newer release exists.
     @Published var checkForUpdates: Bool { didSet { save(checkForUpdates, Keys.checkForUpdates) } }
 
@@ -291,7 +293,7 @@ final class Preferences: ObservableObject {
         static let paceWarnings = "paceWarnings", homeRows = "homeRows", hiddenHomeWidgets = "hiddenHomeWidgets", usageShowsRemaining = "usageShowsRemaining"
         static let planUsageShowsRemaining = "planUsageShowsRemaining"
         static let tabSwipe = "tabSwipe"
-        static let hideOnFullscreen = "hideOnFullscreen", checkForUpdates = "checkForUpdates"
+        static let hideOnFullscreen = "hideOnFullscreen", revealAlertsOnFullscreen = "revealAlertsOnFullscreen", checkForUpdates = "checkForUpdates"
         static let sounds = "sounds", tabOrder = "tabOrder", hiddenTabs = "hiddenTabs", disabledActivities = "disabledActivities"
         static let widgetsTabAutomatic = "widgetsTabAutomatic"
         static let accentFollowsSystem = "accentFollowsSystem", clipboardShortcut = "clipboardShortcut"
@@ -311,7 +313,8 @@ final class Preferences: ObservableObject {
 
     static let factoryDefaults: [String: Any] = [
         Keys.emissionIntensity: 0.7, Keys.glowNeedsYou: true, Keys.hideNotch: false, Keys.paceWarnings: true,
-        Keys.usageShowsRemaining: true, Keys.planUsageShowsRemaining: false, Keys.tabSwipe: true, Keys.hideOnFullscreen: true, Keys.checkForUpdates: true,
+        Keys.usageShowsRemaining: true, Keys.planUsageShowsRemaining: false, Keys.tabSwipe: true, Keys.hideOnFullscreen: true,
+        Keys.revealAlertsOnFullscreen: true, Keys.checkForUpdates: true,
         Keys.panelWidth: 500.0, Keys.panelHeight: 148.0, Keys.closedExtraWidth: 0.0, Keys.activityWidthScale: 1.0,
         Keys.bodyOpacity: 1.0, Keys.cornerScale: 1.0, Keys.shadow: true,
         Keys.animationSpeed: 1.35, Keys.bounce: 0.12, Keys.hoverDelay: 0.04, Keys.closeDelay: 0.3, Keys.staggerContent: true,
@@ -378,6 +381,7 @@ final class Preferences: ObservableObject {
         planUsageShowsRemaining = defaults.bool(forKey: Keys.planUsageShowsRemaining)
         tabSwipeEnabled = defaults.bool(forKey: Keys.tabSwipe)
         hideOnFullscreen = defaults.bool(forKey: Keys.hideOnFullscreen)
+        revealAlertsOnFullscreen = defaults.bool(forKey: Keys.revealAlertsOnFullscreen)
         checkForUpdates = defaults.bool(forKey: Keys.checkForUpdates)
         haptics = defaults.bool(forKey: "haptics")
         sounds = defaults.bool(forKey: Keys.sounds)

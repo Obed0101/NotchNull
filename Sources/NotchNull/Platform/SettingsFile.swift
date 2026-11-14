@@ -232,7 +232,8 @@ final class SettingsFile: ObservableObject {
                 return nil
             }
         ),
-        bool("behavior.hideOnFullscreen", "Hide the notch on a display while a fullscreen app covers it.", \.hideOnFullscreen),
+        bool("behavior.hideOnFullscreen", "Slide the notch out of the way on a display while a fullscreen app covers it. Hover the top edge to bring it back.", \.hideOnFullscreen),
+        bool("behavior.revealAlertsOnFullscreen", "Slide the notch back down for agent and notification activities while a fullscreen app covers the display. Hover and shortcuts still work when off.", \.revealAlertsOnFullscreen),
         bool("behavior.checkForUpdates", "Ask GitHub once a day whether a newer NotchNull exists.", \.checkForUpdates),
         bool("behavior.haptics", "Haptic tap when opening.", \.haptics),
         bool("behavior.sounds", "Timer chime and meeting reminder.", \.sounds),

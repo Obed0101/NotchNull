@@ -274,7 +274,8 @@ private struct GeneralSettings: View {
                 .labelsHidden()
                 .frame(width: 150)
             }
-            SettingsToggle(title: "Hide on fullscreen apps", subtitle: "Hide the notch on a display while a fullscreen app covers it.", symbol: "rectangle.inset.filled.on.rectangle", tint: Theme.Accent.system, isOn: $preferences.hideOnFullscreen)
+            SettingsToggle(title: "Slide away on fullscreen apps", subtitle: "Slides the notch out of the way while a fullscreen app covers the display. Hover the top edge to bring it back.", symbol: "rectangle.inset.filled.on.rectangle", tint: Theme.Accent.system, isOn: $preferences.hideOnFullscreen)
+            SettingsToggle(title: "Reveal alerts in fullscreen", subtitle: "Agent and notification activities slide the notch back down. Hover and shortcuts still work when this is off.", symbol: "bell.badge.fill", tint: Theme.Accent.warning, isOn: $preferences.revealAlertsOnFullscreen)
             SettingsToggle(title: "Haptic tap when opening", subtitle: "On Force Touch trackpads.", symbol: "hand.tap.fill", tint: Theme.Accent.tray, isOn: $preferences.haptics)
             SettingsToggle(title: "Launch at login", symbol: "power", tint: Theme.Accent.success, isOn: Binding(
                 get: { launchAtLogin },

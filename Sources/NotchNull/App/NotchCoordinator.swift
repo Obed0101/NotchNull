@@ -47,7 +47,8 @@ final class NotchCoordinator {
     }
 
     private var primaryController: NotchWindowController? {
-        let available = NotchDisplay.connected.filter { controllers[$0.id]?.isFullscreenHidden == false }
+        // Concealed displays stay eligible: an explicit open reveals them.
+        let available = NotchDisplay.connected.filter { controllers[$0.id] != nil }
         guard let id = DisplaySelection.target(available, pointer: NSEvent.mouseLocation) else { return nil }
         return controllers[id]
     }
@@ -69,13 +70,14 @@ final class NotchCoordinator {
     private func makeController(screen: NSScreen, model: NotchViewModel? = nil) -> NotchWindowController {
         let id = NotchGeometry.screenID(screen)
         return NotchWindowController(screen: screen, services: services, model: model,
-            onWindowFailure: { [weak self] in self?.replaceFailedWindow(on: id) })
+            onWindowFailure: { [weak self] in self?.replaceFailedWindow(on: id) },
+            onConcealmentChange: { NotchStatus.write() })
     }
 
     private func replaceFailedWindow(on id: CGDirectDisplayID) {
         // Do not create windows repeatedly while the system itself suppresses overlays.
         if let last = lastWindowReplacement[id], Date().timeIntervalSince(last) < 30 { return }
-        guard let old = controllers[id], !old.isFullscreenHidden,
+        guard let old = controllers[id],
               let screen = eligibleScreens().first(where: { NotchGeometry.screenID($0) == id }) else { return }
         lastWindowReplacement[id] = Date()
         let model = old.model.geometry == NotchGeometry(screen: screen) ? old.model : nil
@@ -124,14 +126,15 @@ final class NotchCoordinator {
         NotchStatus.write()
     }
 
-    /// Hides each display's notch independently while a fullscreen app covers that display.
+    /// Conceals each display's notch independently while a fullscreen app covers that display.
     private func applyFullscreenHiding() {
         let enabled = Preferences.shared.hideOnFullscreen
         let fullscreen = services.fullscreen.fullscreenDisplayIDs
         for (id, controller) in controllers {
-            controller.setFullscreenHidden(enabled && fullscreen.contains(id))
+            controller.setFullscreenActive(enabled && fullscreen.contains(id))
         }
         // With no notch left to draw the HUD, the media keys go back to macOS and its own HUD.
-        services.levels.notchIsHidden = !controllers.isEmpty && controllers.values.allSatisfy(\.isFullscreenHidden)
+        // This follows the fullscreen mode, not a temporary alert reveal.
+        services.levels.notchIsHidden = !controllers.isEmpty && controllers.values.allSatisfy(\.isFullscreenActive)
     }
 }

@@ -58,6 +58,9 @@ enum SnapshotRenderer {
         let preferences = Preferences.shared
         let saved = (preferences.panelWidth, preferences.panelHeight, preferences.closedExtraWidth)
         render(states, geometry: geometry, services: services, to: directory)
+        render([("01-fullscreen-concealed", .closed, .home)], geometry: geometry, services: services, to: directory, fullscreenActive: true)
+        render([("02-fullscreen-revealed", .closed, .home)], geometry: geometry, services: services, to: directory, fullscreenActive: true, pointerInside: true)
+        render([("03-fullscreen-needs-you", .activity(.needsYou), .home)], geometry: geometry, services: services, to: directory, fullscreenActive: true, pointerInside: true)
 
         renderAgentAvailabilityFixtures(geometry: geometry, services: services, to: directory)
 
@@ -105,6 +108,8 @@ enum SnapshotRenderer {
             ("96-island-download-keep", .activity(.downloadKeep), .home), ("89-island-volume", .activity(.volume), .home),
         ]
         render(island, geometry: islandGeometry, services: services, to: directory)
+        render([("88-island-fullscreen-concealed", .closed, .home)], geometry: islandGeometry, services: services, to: directory, fullscreenActive: true)
+        render([("87-island-fullscreen-revealed", .closed, .home)], geometry: islandGeometry, services: services, to: directory, fullscreenActive: true, pointerInside: true)
         // Hovering a satellite grows it into its card.
         render([("98-island-media-card", .closed, .home)], geometry: islandGeometry, services: services, to: directory, satellite: .leading)
         render([("99-island-controls-card", .closed, .home)], geometry: islandGeometry, services: services, to: directory, satellite: .trailing)
@@ -330,7 +335,9 @@ enum SnapshotRenderer {
         geometry: NotchGeometry, services: AppServices, to directory: URL,
         satellite: NotchViewModel.SatelliteSide? = nil,
         fittedPanelHeights: [NotchTab: CGFloat] = [:],
-        displayID: String = ""
+        displayID: String = "",
+        fullscreenActive: Bool = false,
+        pointerInside: Bool = false
     ) {
         for (name, phase, tab) in states {
             // Seed content-fitted tabs from a measurement pass. The final render then draws at the
@@ -339,7 +346,8 @@ enum SnapshotRenderer {
                 ? measuredFittedPanelHeights(phase: phase, tab: tab, geometry: geometry, services: services, satellite: satellite, displayID: displayID)
                 : fittedPanelHeights
             let model = NotchViewModel(geometry: geometry, displayID: displayID, center: ActivityCenter())
-            model.preview(phase: phase, tab: tab, satellite: satellite, fittedPanelHeights: heights)
+            model.preview(phase: phase, tab: tab, satellite: satellite, fittedPanelHeights: heights,
+                fullscreenActive: fullscreenActive, pointerInside: pointerInside)
             let view = SnapshotStage(transparent: transparent, now: SnapshotFixtureDate.display) {
                 NotchRootView()
                     .environmentObject(model)
@@ -631,6 +639,7 @@ private struct SnapshotStage<Content: View>: View {
             content
         }
         .frame(width: Theme.Size.canvas.width, height: Theme.Size.canvas.height)
+        .clipped()
     }
 }
 

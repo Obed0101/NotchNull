@@ -46,6 +46,11 @@ final class NotchViewModel: ObservableObject {
         case drop
     }
 
+    /// Why a fullscreen-concealed notch is currently showing.
+    enum RevealReason: String, Equatable {
+        case activity, hover, open
+    }
+
     let geometry: NotchGeometry
     /// The display's persistent UUID; overrides in `Preferences.displayShapes` are keyed by it.
     /// Empty for previews and snapshots, which match no override.
@@ -57,6 +62,10 @@ final class NotchViewModel: ObservableObject {
     /// Updated by the owning AppKit window, independent of retained SwiftUI transitions.
     @Published var isWindowVisible = true
     var isHomeVisible: Bool { isWindowVisible && phase == .open && visibleTab == .home }
+    /// The display is covered by a fullscreen app and the fullscreen setting is on.
+    @Published private(set) var isFullscreenActive = false
+    /// The current activity should bring the concealed body back automatically.
+    @Published var activityReveals = false
     /// Fitted content heights requested by content-driven tabs. The Agents tab is the only writer.
     @Published private(set) var requestedPanelHeights: [NotchTab: CGFloat] = [:]
     /// Direction of the last tab change, used for the directional content slide.
@@ -69,24 +78,47 @@ final class NotchViewModel: ObservableObject {
     private var closeWork: DispatchWorkItem?
     private var cancellables: Set<AnyCancellable> = []
     private let preferences = Preferences.shared
+    private let center: ActivityCenter
+    private let customActivities: CustomActivityStore
 
     convenience init(geometry: NotchGeometry, displayID: String = "") {
         self.init(geometry: geometry, displayID: displayID, center: ActivityCenter.shared)
     }
 
-    init(geometry: NotchGeometry, displayID: String = "", center: ActivityCenter) {
+    init(geometry: NotchGeometry, displayID: String = "", center: ActivityCenter,
+         customActivities: CustomActivityStore = .shared) {
         self.geometry = geometry
         self.displayID = displayID
+        self.center = center
+        self.customActivities = customActivities
         center.$current
             .receive(on: RunLoop.main)
             .sink { [weak self] kind in self?.activityChanged(kind) }
             .store(in: &cancellables)
+        // Fullscreen selection has to notice a lower-priority alert appearing or expiring while a
+        // higher-priority ambient activity still owns the normal winner.
+        center.$revision
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshActivityPresentation(animated: true) }
+            .store(in: &cancellables)
         // Size preferences change the body live, a custom activity sizes itself to its content,
         // and the needs-you banner grows with each waiting session.
         preferences.objectWillChange
-            .merge(with: CustomActivityStore.shared.objectWillChange, AttentionQueue.shared.objectWillChange)
+            .merge(with: customActivities.objectWillChange, AttentionQueue.shared.objectWillChange)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.objectWillChange.send() } }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.objectWillChange.send()
+                    self?.refreshActivityPresentation(animated: true)
+                }
+            }
+            .store(in: &cancellables)
+        // Automatic reveals are optional; hover and explicit open keep working either way.
+        preferences.$revealAlertsOnFullscreen
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshActivityPresentation(animated: true) }
             .store(in: &cancellables)
         // Changing a display's shape or the satellites changes what the body shows.
         Publishers.CombineLatest3(preferences.$shapeStyle, preferences.$displayShapes, preferences.$islandSatellites)
@@ -403,8 +435,8 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Screen-space rects of the satellites, for clicks.
-    private var satelliteScreenRects: [CGRect] {
-        guard let frames = satelliteFrames else { return [] }
+    var satelliteScreenRects: [CGRect] {
+        guard !isConcealed, let frames = satelliteFrames else { return [] }
         let offset = (Theme.Size.canvas.width / 2) - geometry.screenFrame.midX
         return [frames.left, frames.right].map {
             CGRect(x: $0.minX - offset, y: geometry.screenFrame.maxY - $0.maxY, width: $0.width, height: $0.height).insetBy(dx: -3, dy: -3)
@@ -416,8 +448,17 @@ final class NotchViewModel: ObservableObject {
         CGSize(width: bodySize.width + topRadius * 2, height: bodySize.height)
     }
 
-    /// Screen-space rect that counts as "on the notch" for hover and clicks.
+    /// Screen-space rect that counts as "on the notch" for hover and clicks. While concealed it
+    /// is only the wake strip; once revealed it also keeps the strip in the hover area so moving
+    /// through the island gap does not conceal the body again.
     var interactiveRect: CGRect {
+        if isConcealed { return wakeStripRect }
+        let normal = normalInteractiveRect
+        guard isFullscreenActive, !isExpanded, !isDropping else { return normal }
+        return normal.union(wakeStripRect)
+    }
+
+    private var normalInteractiveRect: CGRect {
         let body = geometry.bodyRect(for: shapeSize, top: bodyTop)
         switch phase {
         case .closed where isIsland:
@@ -433,13 +474,66 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
+    /// Top-centre hover target while the body is out of the way.
+    var wakeStripRect: CGRect {
+        let height = Theme.Size.fullscreenWakeHeight
+        let width = closedSize.width
+        return CGRect(x: geometry.screenFrame.midX - width / 2,
+                      y: geometry.screenFrame.maxY - height,
+                      width: width, height: height)
+    }
+
     /// Rect a file drag must reach to turn the notch into a drop target.
     var dropProximityRect: CGRect {
+        guard !isConcealed else { return .null }
         let size = CGSize(width: max(panelWidth, 360) + 80, height: rowHeight + Theme.Size.dropContentHeight + 60)
         return geometry.bodyRect(for: size, top: bodyTop)
     }
 
     var isExpanded: Bool { phase == .open || phase == .drop }
+
+    // MARK: Fullscreen presence
+
+    /// True while the body and satellites are slid above the display edge.
+    var isConcealed: Bool {
+        guard isFullscreenActive else { return false }
+        if isOpen || isDropping { return false }
+        if isPointerInside || hoveredSatellite != nil || expandedSatellite != nil { return false }
+        return !activityReveals
+    }
+
+    /// Why the notch is currently showing in fullscreen, or nil while concealed or normal.
+    var revealReason: RevealReason? {
+        guard isFullscreenActive, !isConcealed else { return nil }
+        if isOpen || isDropping { return .open }
+        if isPointerInside || hoveredSatellite != nil || expandedSatellite != nil { return .hover }
+        if activityReveals { return .activity }
+        return nil
+    }
+
+    /// Distance the root drawing must move up to leave the display.
+    var concealOffset: CGFloat {
+        guard isConcealed else { return 0 }
+        return -(bodyTop + shapeSize.height + Theme.Size.fullscreenSlideMargin)
+    }
+
+    /// Marks the display as covered by a fullscreen app. The controller keeps the panel
+    /// registered; the view derives the slide from this state.
+    func setFullscreenActive(_ active: Bool) {
+        guard active != isFullscreenActive else { return }
+        isFullscreenActive = active
+        if active {
+            openWork?.cancel()
+            closeWork?.cancel()
+            isPointerInside = false
+            satelliteWork?.cancel()
+            hoveredSatellite = nil
+            if expandedSatellite != nil {
+                withAnimation(Motion.close) { expandedSatellite = nil }
+            }
+        }
+        refreshActivityPresentation(animated: true)
+    }
 
     // MARK: Pointer
 
@@ -457,9 +551,21 @@ final class NotchViewModel: ObservableObject {
         Log.window.debug("Pointer \(inside ? "entered" : "left") notch, phase=\(String(describing: self.phase), privacy: .public)")
         if inside {
             closeWork?.cancel()
-            guard !isOpen, preferences.openTrigger == .hover else { return inside }
-            if case .activity(let kind) = phase, kind.layout.interactive { return inside }
-            schedule(&openWork, after: Motion.hoverOpenDelay) { [weak self] in self?.open() }
+            guard !isOpen else { return inside }
+            // The wake strip is the notch's own access affordance. Hovering it must open the
+            // panel even when the activity below has its own controls (meeting, needs-you,
+            // download prompt); the interactive guard only applies to those controls.
+            let fromWakeStrip = isFullscreenActive && wakeStripRect.contains(point)
+            if !fromWakeStrip, case .activity(let kind) = phase, kind.layout.interactive { return inside }
+            if isFullscreenActive {
+                // Fullscreen deliberately opens on hover even when the general trigger is click.
+                schedule(&openWork, after: max(Motion.hoverOpenDelay, Constants.Intervals.fullscreenHoverOpenDelay)) {
+                    [weak self] in self?.open()
+                }
+            } else {
+                guard preferences.openTrigger == .hover else { return inside }
+                schedule(&openWork, after: Motion.hoverOpenDelay) { [weak self] in self?.open() }
+            }
         } else {
             openWork?.cancel()
             guard isOpen, !isDropping else { return clickable }
@@ -555,34 +661,57 @@ final class NotchViewModel: ObservableObject {
         phase: Phase,
         tab: NotchTab = .home,
         satellite: SatelliteSide? = nil,
-        fittedPanelHeights: [NotchTab: CGFloat] = [:]
+        fittedPanelHeights: [NotchTab: CGFloat] = [:],
+        fullscreenActive: Bool = false,
+        pointerInside: Bool = false
     ) {
         self.phase = phase
         selectedTab = tab
         expandedSatellite = satellite
         requestedPanelHeights = fittedPanelHeights
+        isFullscreenActive = fullscreenActive
+        isPointerInside = pointerInside
     }
 
     private func activityChanged(_ kind: ActivityKind?) {
         incomingActivity = kind
-        updateActivity()
-        apply(kind != nil ? Motion.activity : Motion.close)
+        refreshActivityPresentation(animated: true)
     }
 
     /// The last kind the activity centre reported, kept so a presentation change can re-derive
     /// what the body shows without waiting for a new event.
     private var incomingActivity: ActivityKind?
 
-    /// Music lives in the island's satellite, so it is not shown in the pill there. A shape or
-    /// satellite change re-derives this from the last event instead of keeping a stale wing.
-    private func updateActivity() {
-        activity = incomingActivity == .music && showsMusicSatellite ? nil : incomingActivity
+    /// Re-derives the body content. In fullscreen an attention activity can outrank the normal
+    /// winner; hover and normal display still use the ordinary priority.
+    private func refreshActivityPresentation(animated: Bool) {
+        let alert = fullscreenAlertActivity()
+        let base = isFullscreenActive ? (alert ?? incomingActivity) : incomingActivity
+        // Music lives in the island's satellite, so it is not shown in the pill there.
+        let presented = base == .music && showsMusicSatellite ? nil : base
+        let reveals = isFullscreenActive && preferences.revealAlertsOnFullscreen && alert != nil
+        let presentedChanged = presented != activity
+        let revealsChanged = reveals != activityReveals
+        guard presentedChanged || revealsChanged else { return }
+        if revealsChanged { activityReveals = reveals }
+        guard presentedChanged else { return }
+        activity = presented
+        apply(animated ? (presented != nil ? Motion.activity : Motion.close) : Motion.state)
+    }
+
+    /// The most urgent active activity that should bring a concealed notch back, if any.
+    private func fullscreenAlertActivity() -> ActivityKind? {
+        let store = customActivities
+        return center.mostUrgent { kind in
+            if kind == .custom {
+                return store.current?.expiresAt != nil
+            }
+            return kind.fullscreenPresence == .alert
+        }
     }
 
     private func activityMoved() {
-        let before = activity
-        updateActivity()
-        if activity != before { apply(Motion.state) }
+        refreshActivityPresentation(animated: false)
     }
 
     private func apply(_ animation: Animation) {

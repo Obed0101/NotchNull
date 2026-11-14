@@ -38,6 +38,24 @@ enum ActivityKind: Int, CaseIterable, Comparable {
     }
 }
 
+/// Whether an activity should bring a concealed notch back. Custom activities decide this
+/// separately because the same kind can be a transient notification or a persistent widget.
+enum FullscreenPresence: Equatable {
+    case alert, hidden
+}
+
+extension ActivityKind {
+    var fullscreenPresence: FullscreenPresence {
+        switch self {
+        case .needsYou, .agentDone, .usageWarning, .timerFinished, .lowBattery,
+             .downloadKeep, .downloadDone, .downloadTrashed, .screenshot:
+            .alert
+        default:
+            .hidden
+        }
+    }
+}
+
 /// Arbitrates which activity owns the closed notch. Services post transient events or toggle
 /// persistent ones; the notch renders `current`.
 @MainActor
@@ -47,6 +65,9 @@ final class ActivityCenter: ObservableObject {
     @Published private(set) var current: ActivityKind?
     /// Bumped on every post so an activity re-posted while visible can replay its entrance.
     @Published private(set) var pulse: Int = 0
+    /// Bumped whenever the active set is recomputed, including a transient expiring behind a
+    /// higher-priority winner. Fullscreen reveal selection listens to this, not just `current`.
+    @Published private(set) var revision: Int = 0
 
     private var persistent: Set<ActivityKind> = []
     private var transient: [ActivityKind: Date] = [:]
@@ -76,11 +97,25 @@ final class ActivityCenter: ObservableObject {
         persistent.contains(kind) || (transient[kind].map { $0 > Date() } ?? false)
     }
 
+    /// The most urgent active activity that matches a predicate, without changing the normal
+    /// winner. Fullscreen uses this so an ambient persistent activity cannot mask an alert.
+    func mostUrgent(where predicate: (ActivityKind) -> Bool) -> ActivityKind? {
+        let disabled = UserDefaults.standard.stringArray(forKey: Preferences.Keys.disabledActivities) ?? []
+        return activeKinds(at: Date())
+            .filter { !disabled.contains($0.name) && predicate($0) }
+            .min()
+    }
+
+    private func activeKinds(at now: Date) -> Set<ActivityKind> {
+        persistent.union(transient.filter { $0.value > now }.keys)
+    }
+
     private func recompute() {
+        revision &+= 1
         let now = Date()
         transient = transient.filter { $0.value > now }
         let disabled = UserDefaults.standard.stringArray(forKey: Preferences.Keys.disabledActivities) ?? []
-        let candidates = persistent.union(transient.keys).filter { !disabled.contains($0.name) }
+        let candidates = activeKinds(at: now).filter { !disabled.contains($0.name) }
         let next = candidates.min()
         if next != current { current = next }
         scheduleExpiry()

@@ -24,19 +24,26 @@ final class NotchWindowController {
     /// The keyboard shortcut opened the panel, so losing focus closes it again.
     private var openedFromKeyboard = false
     /// A fullscreen app covers this controller's display (and the setting is on).
-    private var fullscreenHidden = false
+    private var fullscreenActive = false
     /// The display is asleep, or the app is hidden; both stop all notch work.
     private var displayAsleep = false
     private var appHidden = false
     private var tornDown = false
     private var failedRestores = 0
+    private var lastStatusConcealed = false
+    private var lastStatusFullscreen = false
+    private var lastStatusReveal: NotchViewModel.RevealReason?
     private let onWindowFailure: (() -> Void)?
-    var isFullscreenHidden: Bool { fullscreenHidden }
+    private let onConcealmentChange: (@MainActor () -> Void)?
+    var isFullscreenActive: Bool { fullscreenActive }
 
-    init(screen: NSScreen, services: AppServices, model: NotchViewModel? = nil, onWindowFailure: (() -> Void)? = nil) {
+    init(screen: NSScreen, services: AppServices, model: NotchViewModel? = nil,
+         onWindowFailure: (() -> Void)? = nil,
+         onConcealmentChange: (@MainActor () -> Void)? = nil) {
         let geometry = NotchGeometry(screen: screen)
         self.model = model ?? NotchViewModel(geometry: geometry, displayID: NotchDisplay.persistentID(for: screen))
         self.onWindowFailure = onWindowFailure
+        self.onConcealmentChange = onConcealmentChange
         panel = NotchPanel(frame: geometry.windowFrame)
         clipboard = services.clipboard
         picker = services.clipboardPicker
@@ -125,24 +132,31 @@ final class NotchWindowController {
         panel.close()
     }
 
-    /// Hides this display's notch while a fullscreen app covers it; the controller is kept
-    /// so the notch returns instantly when fullscreen ends.
-    func setFullscreenHidden(_ hidden: Bool) {
-        guard hidden != fullscreenHidden else {
+    /// Marks this display as covered by a fullscreen app. The panel stays registered; the body
+    /// slides out of the way and is ready to reveal without rebuilding the window.
+    func setFullscreenActive(_ active: Bool) {
+        guard active != fullscreenActive else {
             // AppKit can order a panel out independently during Space/display transitions.
             // An unchanged fullscreen state must still reconcile the actual window.
-            if !hidden { restoreVisibility() }
+            if !active { restoreVisibility() }
             return
         }
-        fullscreenHidden = hidden
-        if hidden {
+        fullscreenActive = active
+        model.setFullscreenActive(active)
+        if active {
+            if model.phase == .drop { model.endDrop() }
             model.close()
-            panel.orderOut(nil)
-            refreshSampling()
+            ensurePanelOrderedIn()
         } else {
             restoreVisibility()
         }
         refreshSampling()
+    }
+
+    private func ensurePanelOrderedIn() {
+        guard !tornDown, !panel.isVisible else { return }
+        panel.setFrame(model.geometry.windowFrame, display: false)
+        panel.orderFrontRegardless()
     }
 
     /// nil means Window Server could not be queried; it is not evidence of a hidden panel.
@@ -159,7 +173,10 @@ final class NotchWindowController {
             "appKitVisible": .bool(panel.isVisible),
             "onActiveSpace": .bool(panel.isOnActiveSpace),
             "windowServerVisible": windowServerVisibility.map(JSONValue.bool) ?? .null,
-            "fullscreenHidden": .bool(fullscreenHidden),
+            "fullscreen": .bool(fullscreenActive),
+            "concealed": .bool(model.isConcealed),
+            "reveal": model.revealReason.map { .string($0.rawValue) } ?? .null,
+            "fullscreenHidden": .bool(fullscreenActive),
             "failedRestores": .number(Double(failedRestores)),
         ])
     }
@@ -167,7 +184,7 @@ final class NotchWindowController {
     /// Takes an observed Window Server state so the failure path can be tested deterministically.
     func reconcileWindowVisibility(isOnScreen: Bool?) {
         refreshSampling(isOnScreen: isOnScreen)
-        guard !tornDown, !fullscreenHidden, !NSApp.isHidden, let isOnScreen else { return }
+        guard !tornDown, !NSApp.isHidden, let isOnScreen else { return }
         if isOnScreen {
             failedRestores = 0
             if panel.frame != model.geometry.windowFrame { restoreVisibility() }
@@ -184,7 +201,7 @@ final class NotchWindowController {
     }
 
     private func restoreVisibility(forceReorder: Bool = false) {
-        guard !tornDown, !fullscreenHidden else { return }
+        guard !tornDown else { return }
         if forceReorder { panel.orderOut(nil) }
         panel.setFrame(model.geometry.windowFrame, display: false)
         panel.orderFrontRegardless()
@@ -193,15 +210,23 @@ final class NotchWindowController {
     }
 
     private func refreshSampling(isOnScreen: Bool? = nil) {
-        let visible = !tornDown && !fullscreenHidden && !displayAsleep && !appHidden && !NSApp.isHidden && panel.isVisible
+        let visible = !tornDown && !model.isConcealed && !displayAsleep && !appHidden && !NSApp.isHidden && panel.isVisible
             && (isOnScreen ?? panel.occlusionState.contains(.visible))
         if model.isWindowVisible != visible { model.isWindowVisible = visible }
         clock.setActive(visible, consumer: clockConsumer)
         stats.setActive(visible && model.isHomeVisible && Preferences.shared.statsEnabled, consumer: statsConsumer)
+        let reveal = model.revealReason
+        if lastStatusConcealed != model.isConcealed || lastStatusFullscreen != fullscreenActive || lastStatusReveal != reveal {
+            lastStatusConcealed = model.isConcealed
+            lastStatusFullscreen = fullscreenActive
+            lastStatusReveal = reveal
+            // Do not call pointerMoved here: it could re-open a notch that just concealed.
+            panel.ignoresMouseEvents = !model.interactiveRect.contains(NSEvent.mouseLocation)
+            onConcealmentChange?()
+        }
     }
 
     func open(tab: NotchTab? = nil) {
-        guard !fullscreenHidden else { return }
         failedRestores = 0
         restoreVisibility(forceReorder: windowServerVisibility == false)
         model.open(tab: tab)
@@ -212,7 +237,6 @@ final class NotchWindowController {
     /// The Clipboard shortcut: opens the panel on Clipboard ready to type, or closes it when it
     /// is already showing Clipboard with the keyboard.
     func toggleClipboardFromKeyboard() {
-        guard !fullscreenHidden else { return }
         if model.phase == .open, model.selectedTab == .clipboard, panel.isKeyWindow {
             endKeyboardSession(restoreFocus: true)
             return
@@ -329,12 +353,12 @@ final class NotchWindowController {
     // MARK: Pointer
 
     private func pointerMoved(_ point: NSPoint) {
-        guard !dropArmed, !fullscreenHidden else { return }
+        guard !dropArmed else { return }
         panel.ignoresMouseEvents = !model.pointerMoved(to: point)
     }
 
     private func pointerDragged(_ point: NSPoint, hasFileDrag: Bool) {
-        guard hasFileDrag, Preferences.shared.trayEnabled else { return }
+        guard !model.isConcealed, hasFileDrag, Preferences.shared.trayEnabled else { return }
         let near = model.dropProximityRect.contains(point)
         if near && !dropArmed {
             dropArmed = true
@@ -359,6 +383,7 @@ final class NotchWindowController {
     }
 
     private func scrolled(_ event: NSEvent) {
+        guard !model.isConcealed else { return }
         let location = NSEvent.mouseLocation
         guard model.interactiveRect.contains(location) else { return }
         if event.phase == .began { scrollAccumulator = 0 }
