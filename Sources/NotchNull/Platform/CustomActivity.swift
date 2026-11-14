@@ -78,6 +78,18 @@ final class CustomActivityStore: ObservableObject {
 
     @Published private(set) var items: [String: CustomActivity] = [:]
     private var expiryTimer: Timer?
+    private let center: ActivityCenter
+    /// Tests use a private store and must not rewrite the user's status file.
+    private let writesStatus: Bool
+
+    init(center: ActivityCenter, writesStatus: Bool = true) {
+        self.center = center
+        self.writesStatus = writesStatus
+    }
+
+    convenience init() {
+        self.init(center: ActivityCenter.shared)
+    }
 
     var current: CustomActivity? { items.values.max { $0.updatedAt < $1.updatedAt } }
 
@@ -103,14 +115,14 @@ final class CustomActivityStore: ObservableObject {
     private func refresh() {
         let now = Date()
         items = items.filter { ($0.value.expiresAt ?? .distantFuture) > now }
-        ActivityCenter.shared.setPersistent(.custom, active: !items.isEmpty)
+        center.setPersistent(.custom, active: !items.isEmpty)
         expiryTimer?.invalidate()
         if let next = items.values.compactMap(\.expiresAt).min() {
             expiryTimer = Timer.scheduledTimer(withTimeInterval: max(0.05, next.timeIntervalSinceNow), repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             }
         }
-        NotchStatus.write()
+        if writesStatus { NotchStatus.write() }
     }
 
     /// Size of the custom activity's body, which depends on what it shows.

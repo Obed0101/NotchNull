@@ -112,7 +112,7 @@ Scripts can use the same surface: every CLI command is a call to a local API on 
 - Charging, low battery, and battery color that follows Low Power / High Power mode.
 - Devices: Bluetooth headphones and speakers with AirPods battery, keyboards, mice, controllers, **ESP32 / Arduino boards with their serial port**, drives, displays, AirDrop.
 - Downloads with progress, screenshots, timers (presets or any `HH:MM:SS`), meeting countdowns, a hello on login.
-- The notch steps aside on a display while a fullscreen app covers it, each display on its own (Settings › General).
+- The notch slides out of the way on a display while a fullscreen app covers it, and slides back for agent alerts, notifications or a hover at the top edge, each display on its own (Settings › General).
 
 **Downloads that clean themselves**
 - Each new download asks, right in the notch, how long to keep it: 10 minutes, an hour, a day, a week, 30 days, or Keep. Then it goes to the Trash, with Undo.

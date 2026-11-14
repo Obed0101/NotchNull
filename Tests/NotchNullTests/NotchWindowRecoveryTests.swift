@@ -4,6 +4,11 @@ import XCTest
 
 @MainActor
 final class NotchWindowRecoveryTests: XCTestCase {
+    private func resetSharedActivities() async {
+        for kind in ActivityKind.allCases { ActivityCenter.shared.dismiss(kind) }
+        try? await Task.sleep(for: .milliseconds(60))
+    }
+
     private func withController(onWindowFailure: (() -> Void)? = nil,
         _ check: (NotchWindowController, NotchPanel) async -> Void) async throws {
         _ = NSApplication.shared
@@ -45,7 +50,7 @@ final class NotchWindowRecoveryTests: XCTestCase {
     func testVisibilityReconciliationRestoresAnOrderedOutPanel() async throws {
         try await withController { controller, panel in
             panel.orderOut(nil)
-            controller.setFullscreenHidden(false)
+            controller.setFullscreenActive(false)
             XCTAssertTrue(panel.isVisible)
         }
     }
@@ -54,24 +59,61 @@ final class NotchWindowRecoveryTests: XCTestCase {
         try await withController { controller, panel in
             let expected = controller.model.geometry.windowFrame
             panel.setFrameOrigin(NSPoint(x: expected.minX - 4000, y: expected.minY))
-            controller.setFullscreenHidden(false)
+            controller.setFullscreenActive(false)
             XCTAssertEqual(panel.frame, expected)
             XCTAssertTrue(panel.isVisible)
         }
     }
 
-    func testRecoveryNeverShowsThePanelWhileFullscreenHidingIsActive() async throws {
+    func testFullscreenKeepsThePanelRegisteredAndExplicitOpenRevealsIt() async throws {
         try await withController { controller, panel in
-            controller.setFullscreenHidden(true)
-            controller.open(tab: .home)
-            controller.toggleClipboardFromKeyboard()
-            controller.setFullscreenHidden(true)
-            try? await Task.sleep(for: .seconds(Constants.Intervals.fullscreenPoll + 0.5))
-            XCTAssertFalse(panel.isVisible)
-            XCTAssertFalse(panel.isKeyWindow)
-            XCTAssertTrue(controller.isFullscreenHidden)
-            controller.setFullscreenHidden(false)
+            await resetSharedActivities()
+            controller.setFullscreenActive(true)
             XCTAssertTrue(panel.isVisible)
+            XCTAssertTrue(controller.isFullscreenActive)
+            XCTAssertTrue(controller.model.isConcealed)
+            XCTAssertFalse(controller.model.isWindowVisible)
+
+            controller.open(tab: .home)
+            XCTAssertTrue(panel.isVisible)
+            XCTAssertFalse(controller.model.isConcealed)
+            XCTAssertEqual(controller.model.phase, .open)
+
+            controller.model.close()
+            controller.toggleClipboardFromKeyboard()
+            XCTAssertTrue(panel.isVisible)
+            XCTAssertFalse(controller.model.isConcealed)
+            XCTAssertEqual(controller.model.selectedTab, .clipboard)
+
+            controller.setFullscreenActive(false)
+            XCTAssertFalse(controller.model.isConcealed)
+            XCTAssertTrue(panel.isVisible)
+        }
+    }
+
+    func testWindowStatusReportsFullscreenConcealment() async throws {
+        try await withController { controller, _ in
+            await resetSharedActivities()
+            controller.setFullscreenActive(true)
+            var status = controller.windowStatus.object ?? [:]
+            XCTAssertEqual(status["fullscreen"]?.bool, true)
+            XCTAssertEqual(status["concealed"]?.bool, true)
+            XCTAssertEqual(status["fullscreenHidden"]?.bool, true)
+            XCTAssertNil(status["reveal"]?.string)
+
+            controller.model.activityReveals = true
+            status = controller.windowStatus.object ?? [:]
+            XCTAssertEqual(status["concealed"]?.bool, false)
+            XCTAssertEqual(status["reveal"]?.string, "activity")
+
+            controller.model.isPointerInside = true
+            status = controller.windowStatus.object ?? [:]
+            XCTAssertEqual(status["reveal"]?.string, "hover")
+
+            controller.setFullscreenActive(false)
+            status = controller.windowStatus.object ?? [:]
+            XCTAssertEqual(status["fullscreen"]?.bool, false)
+            XCTAssertEqual(status["concealed"]?.bool, false)
         }
     }
 
@@ -121,15 +163,18 @@ final class NotchWindowRecoveryTests: XCTestCase {
         }
     }
 
-    func testUnknownWindowServerStateAndFullscreenNeverRequestReplacement() async throws {
+    func testUnknownWindowServerStateIsIgnoredButFullscreenStillRecovers() async throws {
         var replacements = 0
         try await withController(onWindowFailure: { replacements += 1 }) { controller, _ in
             controller.reconcileWindowVisibility(isOnScreen: nil)
             controller.reconcileWindowVisibility(isOnScreen: nil)
-            controller.setFullscreenHidden(true)
-            controller.reconcileWindowVisibility(isOnScreen: false)
+            XCTAssertEqual(replacements, 0)
+
+            controller.setFullscreenActive(true)
             controller.reconcileWindowVisibility(isOnScreen: false)
             XCTAssertEqual(replacements, 0)
+            controller.reconcileWindowVisibility(isOnScreen: false)
+            XCTAssertEqual(replacements, 1)
         }
     }
 
@@ -149,18 +194,19 @@ final class NotchWindowRecoveryTests: XCTestCase {
 
     func testClockPausesWhenTheNotchIsNotVisibleAndResumesWhenRestored() async throws {
         try await withControllerAndServices { controller, panel, services in
+            await resetSharedActivities()
             // The clock ticks only while a time label shows in a visible window.
             services.clock.setShowing(true, label: UUID())
             controller.reconcileWindowVisibility(isOnScreen: true)
             XCTAssertEqual(services.clock.activeConsumers, 1)
             XCTAssertTrue(services.clock.isRunning)
 
-            controller.setFullscreenHidden(true)
+            controller.setFullscreenActive(true)
             XCTAssertFalse(controller.model.isWindowVisible)
             XCTAssertEqual(services.clock.activeConsumers, 0)
             XCTAssertFalse(services.clock.isRunning)
 
-            controller.setFullscreenHidden(false)
+            controller.setFullscreenActive(false)
             controller.reconcileWindowVisibility(isOnScreen: true)
             XCTAssertTrue(controller.model.isWindowVisible)
             XCTAssertEqual(services.clock.activeConsumers, 1)
@@ -172,7 +218,7 @@ final class NotchWindowRecoveryTests: XCTestCase {
             }
             XCTAssertEqual(services.clock.activeConsumers, 0)
 
-            controller.setFullscreenHidden(false)
+            controller.setFullscreenActive(false)
             controller.reconcileWindowVisibility(isOnScreen: true)
             XCTAssertEqual(services.clock.activeConsumers, 1)
         }
@@ -213,22 +259,22 @@ final class NotchWindowRecoveryTests: XCTestCase {
             first.tearDown()
             second.tearDown()
         }
-
+        await resetSharedActivities()
         services.clock.setShowing(true, label: UUID())
         first.reconcileWindowVisibility(isOnScreen: true)
         second.reconcileWindowVisibility(isOnScreen: true)
         XCTAssertEqual(services.clock.activeConsumers, 2)
         XCTAssertTrue(services.clock.isRunning)
 
-        first.setFullscreenHidden(true)
+        first.setFullscreenActive(true)
         XCTAssertEqual(services.clock.activeConsumers, 1)
         XCTAssertTrue(second.model.isWindowVisible)
 
-        second.setFullscreenHidden(true)
+        second.setFullscreenActive(true)
         XCTAssertEqual(services.clock.activeConsumers, 0)
         XCTAssertFalse(services.clock.isRunning)
 
-        first.setFullscreenHidden(false)
+        first.setFullscreenActive(false)
         first.reconcileWindowVisibility(isOnScreen: true)
         XCTAssertEqual(services.clock.activeConsumers, 1)
         XCTAssertTrue(services.clock.isRunning)
@@ -240,6 +286,7 @@ final class NotchWindowRecoveryTests: XCTestCase {
         let services = AppServices()
         let controller = NotchWindowController(screen: screen, services: services)
         defer { controller.tearDown() }
+        await resetSharedActivities()
         controller.open(tab: .home)
         try? await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(controller.model.phase, .open)
@@ -256,11 +303,11 @@ final class NotchWindowRecoveryTests: XCTestCase {
         XCTAssertFalse(services.stats.isSampling)
         controller.open(tab: .home)
         try? await Task.sleep(for: .milliseconds(100))
-        controller.setFullscreenHidden(true)
+        controller.setFullscreenActive(true)
         XCTAssertFalse(services.stats.isSampling)
         XCTAssertFalse(controller.model.isWindowVisible)
         XCTAssertEqual(services.clock.activeConsumers, 0)
-        controller.setFullscreenHidden(false)
+        controller.setFullscreenActive(false)
         controller.open(tab: .home)
         try? await Task.sleep(for: .milliseconds(100))
         controller.reconcileWindowVisibility(isOnScreen: true)

@@ -11,7 +11,22 @@ Automatic shape uses the hardware notch where available and an island everywhere
 else, including external monitors, Sidecar, and MacBook resolutions that omit the
 notch. The clipboard shortcut and open/close commands target the enabled display
 under the pointer, falling back to built-in, then main/first eligible display.
-Fullscreen-hidden displays are excluded from shortcut targeting.
+Displays concealed by a fullscreen app remain eligible for explicit shortcut and
+API opens; opening one slides it back down.
+
+## Fullscreen
+
+While a fullscreen app covers a display, the notch slides above the top edge and
+stays registered, so it can come back without rebuilding its window. Attention
+activities slide it back: an agent needs you or finishes, a usage warning, a
+finished timer or low battery, a download keep/done/trash prompt, a screenshot, or
+a transient custom activity. Running agents, an active timer, an upcoming meeting,
+download progress, music, volume, brightness and the other ambient states stay
+concealed until the pointer reaches the top-centre wake strip. Hovering that strip
+slides the notch down and opens the panel; clicking it also opens; moving away
+closes and conceals after the close delay. Each display conceals independently.
+`behavior.revealAlertsOnFullscreen` (default true) turns automatic alert reveals
+off without disabling hover or explicit opens.
 
 ## Per-display shape
 
@@ -65,9 +80,12 @@ Applying a shape card in Setup, or "Reset look, size and motion", clears every
 override.
 
 `notchnull status` reports connected displays (names, UUIDs, scale, logical size)
-and panel display IDs, global frames, shapes, and Window Server visibility.
-`behavior.selectedDisplays` in settings.json holds selected UUIDs; set
-`behavior.display` to `selected` to use them.
+and panel display IDs, global frames, shapes, Window Server visibility, and each
+panel's `fullscreen`, `concealed` and `reveal` state (`activity`, `hover`, `open`,
+or null). `fullscreenHidden` remains the fullscreen-mode flag for compatibility;
+`appKitVisible` can be true while `concealed` is true. `behavior.selectedDisplays`
+in settings.json holds selected UUIDs; set `behavior.display` to `selected` to use
+them.
 
 ## Checked on real connected hardware
 

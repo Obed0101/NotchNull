@@ -29,7 +29,7 @@ final class LevelsService: ObservableObject {
     @Published private(set) var keyTapActive = false
     /// Current output volume (0 when muted) for in-panel sliders.
     @Published private(set) var outputVolume: Float = 0
-    /// Every notch is hidden behind a fullscreen app, so nothing here can show a level.
+    /// Every notch is in fullscreen concealment, so nothing here can show a level.
     var notchIsHidden = false
 
     private var device: AudioDeviceID?

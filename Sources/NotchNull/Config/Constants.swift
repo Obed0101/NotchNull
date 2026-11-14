@@ -99,6 +99,10 @@ enum Constants {
         static let powerModePoll: TimeInterval = 20
         /// Backstop for fullscreen transitions that post no notification; events refresh immediately.
         static let fullscreenPoll: TimeInterval = 2.5
+        /// A deliberate hover before the wake strip opens the panel in fullscreen.
+        static let fullscreenHoverOpenDelay: TimeInterval = 0.12
+        /// A temporarily visible menu bar is not evidence that fullscreen ended before this.
+        static let fullscreenMenuBarGrace: TimeInterval = 1.5
     }
 
     enum Durations {

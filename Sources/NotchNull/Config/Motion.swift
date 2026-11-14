@@ -36,6 +36,21 @@ enum Motion {
     /// Wings sliding out of the notch for live activities.
     static var activity: Animation { spring(0.32) }
 
+    /// Sliding the body out of the way while a fullscreen app covers the display. Closing
+    /// never overshoots; Reduce Motion leaves the view in place and the caller fades instead.
+    static var conceal: Animation {
+        if reduceMotion { return .easeOut(duration: 0.15) }
+        if isInstant { return .easeOut(duration: 0.1) }
+        return spring(0.30, bounce: 0)
+    }
+
+    /// Bringing the concealed body back down.
+    static var reveal: Animation {
+        if reduceMotion { return .easeOut(duration: 0.15) }
+        if isInstant { return .easeOut(duration: 0.1) }
+        return spring(0.38)
+    }
+
     /// Routine state change inside the panel (tab switch, toggles, rows).
     static var state: Animation { spring(0.26, bounce: bounce * 0.5) }
 

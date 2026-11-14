@@ -78,6 +78,10 @@ enum Theme {
         static let islandWingGap: CGFloat = 16
         /// Island: gap between the pill and a satellite.
         static let satelliteGap: CGFloat = 8
+        /// How far past the body the fullscreen slide travels, clearing its shadow and emission edge.
+        static let fullscreenSlideMargin: CGFloat = 40
+        /// Height of the top-centre hover target while the notch is concealed for fullscreen.
+        static let fullscreenWakeHeight: CGFloat = 8
     }
 
     enum Typeface {

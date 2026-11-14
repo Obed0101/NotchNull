@@ -34,11 +34,16 @@ final class FullscreenWatcher: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var settingCancellable: AnyCancellable?
     private var lastPublished: Set<CGDirectDisplayID>?
+    /// When each notched display first showed a menu bar during a fullscreen transition.
+    private var menuBarVisibleSince: [CGDirectDisplayID: Date] = [:]
 
     /// Window owners that cover the screen but are not apps (menu bar, wallpaper, overlays).
+    /// The screenshot UI is included because its full-screen overlay otherwise looks exactly
+    /// like a fullscreen app for the few seconds the capture controls are open.
     static let excludedOwners: Set<String> = [
         "Dock", "Window Server", "Control Center", "Notification Center",
         "Wallpaper", "ScreenSaverEngine", "loginwindow",
+        "Screenshot", "screencapture", "screencaptureui", "ScreenCapture",
     ]
 
     /// Bounds slop in points: fullscreen windows should match the display exactly, but allow
@@ -56,13 +61,19 @@ final class FullscreenWatcher: ObservableObject {
         let workspace = NSWorkspace.shared.notificationCenter
         observers = [
             center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
+                MainActor.assumeIsolated {
+                    self?.resetHysteresis()
+                    self?.refresh()
+                }
             },
             workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
             workspace.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
+                MainActor.assumeIsolated {
+                    self?.resetHysteresis()
+                    self?.refresh()
+                }
             },
         ]
         settingCancellable = Preferences.shared.$hideOnFullscreen
@@ -86,15 +97,32 @@ final class FullscreenWatcher: ObservableObject {
         guard Preferences.shared.hideOnFullscreen else {
             if fullscreenDisplayIDs.isEmpty == false { fullscreenDisplayIDs = [] }
             lastPublished = []
+            menuBarVisibleSince.removeAll()
             return
         }
+        let now = Date()
         let windows = Self.currentWindows()
         let screens = Self.currentScreens()
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let next = Self.fullscreenDisplayIDs(windows: windows, screens: screens, ownPID: ownPID)
+        let strict = Self.fullscreenDisplayIDs(windows: windows, screens: screens, ownPID: ownPID)
+        let belowHousing = Self.belowHousingFullscreenDisplayIDs(windows: windows, screens: screens, ownPID: ownPID)
+        let next = Self.applyingMenuBarGrace(
+            strict: strict,
+            belowHousing: belowHousing,
+            previous: lastPublished ?? [],
+            screens: screens,
+            windows: windows,
+            menuBarVisibleSince: &menuBarVisibleSince,
+            now: now,
+            grace: Constants.Intervals.fullscreenMenuBarGrace
+        )
         guard next != lastPublished else { return }
         lastPublished = next
         fullscreenDisplayIDs = next
+    }
+
+    private func resetHysteresis() {
+        menuBarVisibleSince.removeAll()
     }
 
     private static func currentScreens() -> [FullscreenScreen] {
@@ -160,6 +188,64 @@ final class FullscreenWatcher: ObservableObject {
                 break
             }
         }
+        return result
+    }
+
+    /// Pure matcher for a fullscreen-sized window that starts below the camera housing,
+    /// regardless of whether the menu bar is temporarily visible.
+    static func belowHousingFullscreenDisplayIDs(
+        windows: [FullscreenWindow],
+        screens: [FullscreenScreen],
+        ownPID: Int32
+    ) -> Set<CGDirectDisplayID> {
+        var result: Set<CGDirectDisplayID> = []
+        for screen in screens where screen.topInset > 0 {
+            for window in windows {
+                guard window.layer == 0,
+                      window.pid != ownPID,
+                      !excludedOwners.contains(window.owner),
+                      abs(window.bounds.minX - screen.bounds.minX) <= sizeTolerance,
+                      abs(window.bounds.maxX - screen.bounds.maxX) <= sizeTolerance,
+                      abs(window.bounds.maxY - screen.bounds.maxY) <= sizeTolerance,
+                      abs((window.bounds.minY - screen.bounds.minY) - screen.topInset) <= sizeTolerance
+                else { continue }
+                result.insert(screen.id)
+                break
+            }
+        }
+        return result
+    }
+
+    /// Keeps a notched display in fullscreen while its menu bar is only briefly visible.
+    /// The menu bar hides in fullscreen; raising the pointer to the top edge reveals it, which
+    /// must not be mistaken for leaving fullscreen before the user has a chance to interact.
+    static func applyingMenuBarGrace(
+        strict: Set<CGDirectDisplayID>,
+        belowHousing: Set<CGDirectDisplayID>,
+        previous: Set<CGDirectDisplayID>,
+        screens: [FullscreenScreen],
+        windows: [FullscreenWindow],
+        menuBarVisibleSince: inout [CGDirectDisplayID: Date],
+        now: Date,
+        grace: TimeInterval
+    ) -> Set<CGDirectDisplayID> {
+        var result = strict
+        var next: [CGDirectDisplayID: Date] = [:]
+        for screen in screens {
+            let visible = screen.topInset > 0 && menuBarIsVisible(on: screen, windows: windows)
+            if visible {
+                next[screen.id] = menuBarVisibleSince[screen.id] ?? now
+            }
+            guard previous.contains(screen.id),
+                  belowHousing.contains(screen.id),
+                  !strict.contains(screen.id),
+                  visible,
+                  let since = next[screen.id],
+                  now.timeIntervalSince(since) < grace
+            else { continue }
+            result.insert(screen.id)
+        }
+        menuBarVisibleSince = next
         return result
     }
 
