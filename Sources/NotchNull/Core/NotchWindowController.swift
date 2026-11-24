@@ -33,6 +33,7 @@ final class NotchWindowController {
     private var lastStatusConcealed = false
     private var lastStatusFullscreen = false
     private var lastStatusReveal: NotchViewModel.RevealReason?
+    private var lastStatusAttention: Bool?
     private let onWindowFailure: (() -> Void)?
     private let onConcealmentChange: (@MainActor () -> Void)?
     var isFullscreenActive: Bool { fullscreenActive }
@@ -83,6 +84,7 @@ final class NotchWindowController {
                 self.refreshSampling()
             }
             .store(in: &cancellables)
+        lastStatusAttention = self.model.allowsAttentionExpansion
         refreshSampling()
 
         PointerTracker.shared.register(self, handlers: .init(
@@ -178,6 +180,7 @@ final class NotchWindowController {
             "reveal": model.revealReason.map { .string($0.rawValue) } ?? .null,
             "fullscreenHidden": .bool(fullscreenActive),
             "failedRestores": .number(Double(failedRestores)),
+            "attentionExpansion": .bool(model.allowsAttentionExpansion),
         ])
     }
 
@@ -209,6 +212,9 @@ final class NotchWindowController {
         refreshSampling()
     }
 
+    /// Tests and the coordinator can sample after a preference-only permission change.
+    func refreshSampling() { refreshSampling(isOnScreen: nil) }
+
     private func refreshSampling(isOnScreen: Bool? = nil) {
         let visible = !tornDown && !model.isConcealed && !displayAsleep && !appHidden && !NSApp.isHidden && panel.isVisible
             && (isOnScreen ?? panel.occlusionState.contains(.visible))
@@ -216,10 +222,13 @@ final class NotchWindowController {
         clock.setActive(visible, consumer: clockConsumer)
         stats.setActive(visible && model.isHomeVisible && Preferences.shared.statsEnabled, consumer: statsConsumer)
         let reveal = model.revealReason
-        if lastStatusConcealed != model.isConcealed || lastStatusFullscreen != fullscreenActive || lastStatusReveal != reveal {
+        let attention = model.allowsAttentionExpansion
+        if lastStatusConcealed != model.isConcealed || lastStatusFullscreen != fullscreenActive
+            || lastStatusReveal != reveal || lastStatusAttention != attention {
             lastStatusConcealed = model.isConcealed
             lastStatusFullscreen = fullscreenActive
             lastStatusReveal = reveal
+            lastStatusAttention = attention
             // Do not call pointerMoved here: it could re-open a notch that just concealed.
             panel.ignoresMouseEvents = !model.interactiveRect.contains(NSEvent.mouseLocation)
             onConcealmentChange?()

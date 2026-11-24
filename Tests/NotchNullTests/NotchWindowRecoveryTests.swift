@@ -144,6 +144,41 @@ final class NotchWindowRecoveryTests: XCTestCase {
         }
     }
 
+    func testWindowStatusReportsCurrentAttentionPermission() async throws {
+        var changes = 0
+        try await withController(onConcealmentChange: { changes += 1 }) { controller, _ in
+            let prefs = Preferences.shared
+            let savedMode = prefs.attentionDisplayMode
+            let savedDisplays = prefs.attentionDisplays
+            let savedDisplayMode = prefs.displayMode
+            let savedSelectedDisplays = prefs.selectedDisplays
+            defer {
+                prefs.attentionDisplayMode = savedMode
+                prefs.attentionDisplays = savedDisplays
+                prefs.displayMode = savedDisplayMode
+                prefs.selectedDisplays = savedSelectedDisplays
+            }
+            let initialChanges = changes
+            prefs.displayMode = .all
+            prefs.selectedDisplays = []
+            prefs.attentionDisplayMode = .selected
+            prefs.attentionDisplays = []
+            await waitUntil { controller.windowStatus["attentionExpansion"]?.bool == false }
+            XCTAssertTrue(controller.windowStatus["attentionExpansion"]?.bool == false)
+            XCTAssertFalse(controller.model.allowsAttentionExpansion)
+            await waitUntil { changes > initialChanges }
+            XCTAssertGreaterThan(changes, initialChanges)
+
+            let disabledChanges = changes
+            prefs.attentionDisplayMode = .enabled
+            await waitUntil { controller.windowStatus["attentionExpansion"]?.bool == true }
+            XCTAssertTrue(controller.windowStatus["attentionExpansion"]?.bool == true)
+            XCTAssertTrue(controller.model.allowsAttentionExpansion)
+            await waitUntil { changes > disabledChanges }
+            XCTAssertGreaterThan(changes, disabledChanges)
+        }
+    }
+
     func testClipboardShortcutRestoresAnOrderedOutPanel() async throws {
         try await withController { controller, panel in
             panel.orderOut(nil)

@@ -56,11 +56,30 @@ enum SnapshotRenderer {
         let wideClosed: [State] = [("60-wide-closed", .closed, .home), ("61-wide-music", .activity(.music), .home), ("62-wide-volume", .activity(.volume), .home)]
 
         let preferences = Preferences.shared
+        let savedDisplayMode = preferences.displayMode
+        defer { preferences.displayMode = savedDisplayMode }
+        preferences.displayMode = .all
         let saved = (preferences.panelWidth, preferences.panelHeight, preferences.closedExtraWidth)
         render(states, geometry: geometry, services: services, to: directory)
         render([("01-fullscreen-concealed", .closed, .home)], geometry: geometry, services: services, to: directory, fullscreenActive: true)
         render([("02-fullscreen-revealed", .closed, .home)], geometry: geometry, services: services, to: directory, fullscreenActive: true, pointerInside: true)
         render([("03-fullscreen-needs-you", .activity(.needsYou), .home)], geometry: geometry, services: services, to: directory, fullscreenActive: true, pointerInside: true)
+
+        let savedAttention = (preferences.attentionDisplayMode, preferences.attentionDisplays, preferences.revealAlertsOnFullscreen)
+        let attentionDisplay = NotchDisplay.connected.first
+        let attentionSelection = attentionDisplay.map { [$0.persistentID] } ?? []
+        preferences.revealAlertsOnFullscreen = true
+        preferences.attentionDisplayMode = .selected
+        preferences.attentionDisplays = attentionSelection
+        render([("04-fullscreen-attention-selected", .activity(.needsYou), .home)], geometry: geometry, services: services, to: directory, displayID: attentionDisplay?.persistentID ?? "", fullscreenActive: true)
+        preferences.attentionDisplays = []
+        render([("05-fullscreen-attention-unselected", .activity(.needsYou), .home)], geometry: geometry, services: services, to: directory, displayID: attentionDisplay?.persistentID ?? "", fullscreenActive: true)
+        render([("06-fullscreen-attention-unselected-hover", .open, .home)], geometry: geometry, services: services, to: directory, displayID: attentionDisplay?.persistentID ?? "", fullscreenActive: true, pointerInside: true)
+        preferences.attentionDisplayMode = .followDisplay
+        render([("07-fullscreen-attention-follows-display", .activity(.needsYou), .home)], geometry: geometry, services: services, to: directory, displayID: attentionDisplay?.persistentID ?? "", fullscreenActive: true)
+        preferences.attentionDisplayMode = savedAttention.0
+        preferences.attentionDisplays = savedAttention.1
+        preferences.revealAlertsOnFullscreen = savedAttention.2
 
         renderAgentAvailabilityFixtures(geometry: geometry, services: services, to: directory)
 
@@ -171,35 +190,57 @@ enum SnapshotRenderer {
         render([("74-widget-wing", .activity(.custom), .home)], geometry: geometry, services: services, to: directory)
         renderSettingsPage("80-settings-build", services: services, to: directory) { BuildSettings() }
         renderSettingsPage("81-settings-setup", services: services, to: directory) { SetupSettings() }
-        // The style page shows every connected screen, so the per-screen rows are visible here even
-        // when the reviewer's own settings show the notch on one display only.
+        // Show every connected screen and both attention states even when the reviewer's own
+        // settings show the notch on one display only. Style now has a Default shape picker,
+        // inline per-display segments and an Advanced housing disclosure; the Displays page has a
+        // Show notch switch and an Attention switch on every row.
         let pageMode = preferences.displayMode
+        let pageSelected = preferences.selectedDisplays
+        let pageAttentionMode = preferences.attentionDisplayMode
+        let pageAttentionDisplays = preferences.attentionDisplays
         let pageShape = preferences.shapeStyle
         let pageShapes = preferences.displayShapes
+        let connectedDisplays = NotchDisplay.connected
         preferences.displayMode = .all
+        preferences.attentionDisplayMode = .selected
+        preferences.attentionDisplays = connectedDisplays.first.map { [$0.persistentID] } ?? []
         preferences.shapeStyle = .auto
         preferences.displayShapes = [:]
         renderSettingsPage("82-settings-style", services: services, to: directory) { StyleSettings() }
-        // The same page with the notch chosen, where the housing option appears per screen, a screen's
-        // own Automatic saved (it must render as Automatic, not as a blank control), and an override
-        // kept for a screen that is not connected.
+        // The same page with the notch chosen, where an Advanced housing disclosure appears, a
+        // screen's own Auto saved (it must render as Auto, not as a blank control), and an override
+        // kept for a screen that is not connected. Island appearance remains whenever that Auto
+        // screen has no hardware notch.
         preferences.shapeStyle = .notch
         var pageOverrides: [String: Preferences.DisplayShape] = ["DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD": .init(style: .island)]
         if let first = NotchDisplay.connected.first { pageOverrides[first.persistentID] = .init(style: .auto) }
         preferences.displayShapes = pageOverrides
         renderSettingsPage("89-settings-style-notch", services: services, to: directory) { StyleSettings() }
-        preferences.displayMode = pageMode
+        preferences.displayMode = .all
+        preferences.attentionDisplayMode = .selected
+        preferences.attentionDisplays = connectedDisplays.first.map { [$0.persistentID] } ?? []
         preferences.shapeStyle = pageShape
         preferences.displayShapes = pageShapes
         renderSettingsPage("85-settings-displays", services: services, to: directory) { DisplaySettings() }
+        // Custom leaves the first display's notch off and seeds attention for it, so its Attention
+        // switch renders disabled with the Notch is off reason.
+        preferences.displayMode = .selected
+        preferences.selectedDisplays = connectedDisplays.dropFirst().map(\.persistentID)
+        preferences.attentionDisplayMode = .selected
+        preferences.attentionDisplays = connectedDisplays.prefix(1).map(\.persistentID)
+        renderSettingsPage("86-settings-displays-custom", services: services, to: directory) { DisplaySettings() }
+        preferences.displayMode = pageMode
+        preferences.selectedDisplays = pageSelected
+        preferences.attentionDisplayMode = pageAttentionMode
+        preferences.attentionDisplays = pageAttentionDisplays
         renderSettingsPage("83-settings-about", services: services, to: directory) { AboutSettings() }
         let savedAccountConsent = preferences.opencodeAccountUsageAllowed
         preferences.opencodeAccountUsageAllowed = true
-        renderSettingsPage("86-settings-agents", services: services, to: directory) { AgentSettings() }
+        renderSettingsPage("87-settings-agents", services: services, to: directory) { AgentSettings() }
         let savedInstalledProviders = services.agents.installed
         services.agents.preview(warning: services.agents.warning, hooksInstalled: true, opencodePluginInstalled: true, installed: [])
-        renderSettingsPage("87-settings-agents-none-installed", services: services, to: directory) { AgentSettings() }
-        renderSettingsPage("88-settings-permissions-no-claude", services: services, to: directory) { PermissionList() }
+        renderSettingsPage("88-settings-agents-none-installed", services: services, to: directory) { AgentSettings() }
+        renderSettingsPage("89-settings-permissions-no-claude", services: services, to: directory) { PermissionList() }
         services.agents.preview(warning: services.agents.warning, hooksInstalled: true, opencodePluginInstalled: true, installed: savedInstalledProviders)
         preferences.opencodeAccountUsageAllowed = savedAccountConsent
         if let next = AppVersion("\(AppVersion.current.parts.first ?? 0).99.0") {
@@ -207,7 +248,7 @@ enum SnapshotRenderer {
             renderSettingsPage("84-settings-about-update", services: services, to: directory) { AboutSettings() }
             services.updates.preview(.idle)
         }
-        let count: Int = [states.count, medium.count, large.count, wideClosed.count, island.count, 16].reduce(0, +)
+        let count: Int = [states.count, medium.count, large.count, wideClosed.count, island.count, 19].reduce(0, +)
         print("Rendered \(count) snapshots to \(directory.path)")
     }
 
@@ -346,8 +387,21 @@ enum SnapshotRenderer {
                 ? measuredFittedPanelHeights(phase: phase, tab: tab, geometry: geometry, services: services, satellite: satellite, displayID: displayID)
                 : fittedPanelHeights
             let model = NotchViewModel(geometry: geometry, displayID: displayID, center: ActivityCenter())
+            let connectedDisplays = NotchDisplay.connected
+            let preferences = Preferences.shared
+            let attentionExpansion = DisplaySelection.allowsAttention(
+                displayID: displayID,
+                displays: connectedDisplays,
+                displayMode: preferences.displayMode,
+                selected: preferences.selectedDisplays,
+                attentionMode: preferences.attentionDisplayMode,
+                attentionSelected: preferences.attentionDisplays,
+                fallbackScreenFrame: geometry.screenFrame,
+                connected: connectedDisplays
+            )
             model.preview(phase: phase, tab: tab, satellite: satellite, fittedPanelHeights: heights,
-                fullscreenActive: fullscreenActive, pointerInside: pointerInside)
+                fullscreenActive: fullscreenActive, pointerInside: pointerInside,
+                attentionExpansion: attentionExpansion)
             let view = SnapshotStage(transparent: transparent, now: SnapshotFixtureDate.display) {
                 NotchRootView()
                     .environmentObject(model)

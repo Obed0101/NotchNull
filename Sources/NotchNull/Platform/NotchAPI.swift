@@ -103,6 +103,10 @@ enum NotchAPI {
 @MainActor
 enum NotchStatus {
     private static var pending = false
+    private static var pendingAttentionDisplays: Set<String> = []
+    /// Changes even when a display's concealed/reveal state does not, so status can reflect a new
+    /// attention permission without duplicating the per-display policy in the status writer.
+    private static var lastAttentionWrite: [String: Int] = [:]
 
     static func snapshot() -> JSONValue {
         let widgets: [JSONValue] = WidgetStore.shared.widgets.map { widget in
@@ -135,19 +139,29 @@ enum NotchStatus {
                 .object(["displayID": .number(Double(display.id)), "uuid": .string(display.persistentID),
                     "name": .string(display.name), "builtIn": .bool(display.builtIn),
                     "hasHardwareNotch": .bool(display.hasNotch), "scale": .number(display.scale),
+                    "attentionRevision": .number(Double(lastAttentionWrite[display.persistentID] ?? 0)),
                     "width": .number(display.frame.width), "height": .number(display.frame.height)])
             }),
         ])
     }
 
     /// Coalesced: many changes in one runloop turn write the file once.
-    static func write() {
+    static func write(attentionDisplayID: String? = nil) {
         // `notchnull render` runs in its own process; the running app owns this file.
-        guard !pending, !Motion.isSnapshot else { return }
+        guard !Motion.isSnapshot else { return }
+        if let attentionDisplayID { pendingAttentionDisplays.insert(attentionDisplayID) }
+        guard !pending else { return }
         pending = true
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 pending = false
+                // A reveal setting can change while every panel is already in its target state,
+                // so the controller's concealment callback does not fire. Include this display's
+                // UUID to force the status snapshot to reflect its new attention permission.
+                for displayID in pendingAttentionDisplays {
+                    lastAttentionWrite[displayID, default: 0] &+= 1
+                }
+                pendingAttentionDisplays.removeAll()
                 guard let data = try? JSONSerialization.data(withJSONObject: snapshot().any, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) else { return }
                 NotchHome.writeIfChanged(String(decoding: data, as: UTF8.self), to: NotchHome.status)
             }
