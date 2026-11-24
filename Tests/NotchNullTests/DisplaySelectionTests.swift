@@ -121,29 +121,44 @@ final class DisplaySelectionTests: XCTestCase {
         )
     }
 
-    func testAttentionSelectionPrunesOnlyActivelyDisabledDisplays() {
+    func testAttentionSelectionSurvivesDisplayModeChangesAndDisabledNotches() {
         let screens = [monitor, mac, ipad]
-        let saved = [monitor.persistentID, mac.persistentID.lowercased(), ipad.persistentID,
-                     "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"]
+        let disconnected = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
+        let saved = [monitor.persistentID, mac.persistentID.lowercased(), disconnected]
+
+        // Custom initially shows only A. Selecting attention on B while All is shown must survive
+        // switching back to Custom and then All again.
         XCTAssertEqual(
-            DisplaySelection.pruneAttention(saved, displays: screens, displayMode: .selected, selected: [monitor.persistentID.lowercased(), ipad.persistentID]),
-            [monitor.persistentID, ipad.persistentID, "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"]
+            DisplaySelection.attentionEligible(screens, displayMode: .selected, selected: [monitor.persistentID],
+                attentionMode: .selected, attentionSelected: saved),
+            [monitor]
         )
         XCTAssertEqual(
-            DisplaySelection.pruneAttention(saved, displays: screens, displayMode: .selected, selected: [monitor.persistentID]),
-            [monitor.persistentID, "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"]
+            DisplaySelection.attentionEligible(screens, displayMode: .all, selected: [],
+                attentionMode: .selected, attentionSelected: saved),
+            [monitor, mac]
         )
         XCTAssertEqual(
-            DisplaySelection.pruneAttention(saved, displays: screens, displayMode: .all, selected: []),
-            saved
+            DisplaySelection.attentionEligible(screens, displayMode: .selected, selected: [monitor.persistentID],
+                attentionMode: .selected, attentionSelected: saved),
+            [monitor]
         )
         XCTAssertEqual(
-            DisplaySelection.pruneAttention(saved, displays: screens, displayMode: .main, selected: []),
-            saved
+            DisplaySelection.attentionEligible(screens, displayMode: .all, selected: [],
+                attentionMode: .selected, attentionSelected: saved),
+            [monitor, mac]
+        )
+
+        // Mode-hidden displays remain remembered, while only currently eligible displays can expand.
+        XCTAssertEqual(
+            DisplaySelection.attentionEligible(screens, displayMode: .main, selected: [],
+                attentionMode: .selected, attentionSelected: saved),
+            [monitor]
         )
         XCTAssertEqual(
-            DisplaySelection.pruneAttention(saved, displays: screens, displayMode: .builtIn, selected: []),
-            saved
+            DisplaySelection.attentionEligible(screens, displayMode: .builtIn, selected: [],
+                attentionMode: .selected, attentionSelected: saved),
+            [mac]
         )
     }
 

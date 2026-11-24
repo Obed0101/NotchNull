@@ -38,9 +38,9 @@ follows the first eligible display. Every display row has an **Attention** switc
 All enabled displays or Same as Show on is chosen seeds Selected with the current
 effective targets and then applies the switch; in Selected, the switches edit the
 subset directly. Attention is disabled when that display's notch is off, and the
-row says so. Unselected displays still reveal on hover or when opened. Changing
-Show on does not forget attention choices; only turning a connected display's
-notch off in Custom prunes it.
+row says so. Unselected displays still reveal on hover or when opened. Attention
+choices are remembered while a display is hidden or its notch is off; they take
+effect again when that display is shown.
 `behavior.attentionDisplay` is `enabled`, `followDisplay`, or `selected`, and
 `behavior.attentionDisplays` holds the custom subset of display UUIDs. A saved UUID
 cannot expand on a display whose notch is disabled, and disconnected selections

@@ -89,6 +89,8 @@ enum DisplaySelection {
             ) else { return Array(enabled.prefix(1)) }
             return enabled
         case .selected: return enabled.filter { display in
+            // Saved membership may outlive the current Show on mode. Intersect here instead of
+            // deleting hidden displays so their attention choice returns when the notch does.
             attentionSelected.contains { $0.uppercased() == display.persistentID.uppercased() }
         }
         }
@@ -177,25 +179,5 @@ enum DisplaySelection {
 
     private static func sameIdentity(_ lhs: String, _ rhs: String) -> Bool {
         lhs.caseInsensitiveCompare(rhs) == .orderedSame
-    }
-
-    /// Only actively disabled connected displays are pruned. Temporarily disconnected displays and
-    /// connected displays hidden by the current mode stay remembered for when their notch returns.
-    static func pruneAttention(
-        _ attentionSelected: [String],
-        displays: [NotchDisplay],
-        displayMode: Preferences.DisplayMode,
-        selected: [String],
-        connected: [NotchDisplay]? = nil
-    ) -> [String] {
-        let connectedDisplays = connected ?? displays
-        let enabled = eligible(connectedDisplays, mode: displayMode, selected: selected)
-        let enabledIDs = Set(enabled.map { $0.persistentID.uppercased() })
-        // All, Main and Built-in hide screens by mode rather than turning their notch off. Only
-        // Custom can actively disable a connected screen, so only that mode prunes saved attention.
-        let disabled = displayMode == .selected
-            ? Set(connectedDisplays.map { $0.persistentID.uppercased() }).subtracting(enabledIDs)
-            : []
-        return attentionSelected.filter { !disabled.contains($0.uppercased()) }
     }
 }

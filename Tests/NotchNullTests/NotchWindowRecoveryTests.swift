@@ -158,16 +158,22 @@ final class NotchWindowRecoveryTests: XCTestCase {
                 prefs.displayMode = savedDisplayMode
                 prefs.selectedDisplays = savedSelectedDisplays
             }
-            let initialChanges = changes
             prefs.displayMode = .all
             prefs.selectedDisplays = []
+            prefs.attentionDisplayMode = .enabled
+            prefs.attentionDisplays = []
+            await waitUntil { controller.windowStatus["attentionExpansion"]?.bool == true }
+            XCTAssertTrue(controller.windowStatus["attentionExpansion"]?.bool == true)
+            XCTAssertTrue(controller.model.allowsAttentionExpansion)
+
+            let enabledChanges = changes
             prefs.attentionDisplayMode = .selected
             prefs.attentionDisplays = []
             await waitUntil { controller.windowStatus["attentionExpansion"]?.bool == false }
             XCTAssertTrue(controller.windowStatus["attentionExpansion"]?.bool == false)
             XCTAssertFalse(controller.model.allowsAttentionExpansion)
-            await waitUntil { changes > initialChanges }
-            XCTAssertGreaterThan(changes, initialChanges)
+            await waitUntil { changes > enabledChanges }
+            XCTAssertGreaterThan(changes, enabledChanges)
 
             let disabledChanges = changes
             prefs.attentionDisplayMode = .enabled

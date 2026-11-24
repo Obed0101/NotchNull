@@ -29,7 +29,6 @@ final class NotchCoordinator {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.reconcileAttentionDisplays()
                 self.refreshAttentionSampling()
                 self.rebuild()
             }
@@ -39,7 +38,6 @@ final class NotchCoordinator {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.reconcileAttentionDisplays()
                 self.refreshAttentionSampling()
             }
             .store(in: &cancellables)
@@ -112,27 +110,13 @@ final class NotchCoordinator {
     }
 
     private func displaysChanged() {
-        reconcileAttentionDisplays()
         refreshAttentionSampling()
         rebuild()
     }
 
-    private func reconcileAttentionDisplays() {
-        let prefs = Preferences.shared
-        let connected = NotchDisplay.connected
-        let next = DisplaySelection.pruneAttention(
-            prefs.attentionDisplays,
-            displays: connected,
-            displayMode: prefs.displayMode,
-            selected: prefs.selectedDisplays
-        )
-        if next != prefs.attentionDisplays {
-            prefs.attentionDisplays = next
-        }
-        NotchStatus.write()
-    }
-
     private func refreshAttentionSampling() {
+        // Saved attention membership is persistent. Each model intersects it with current notch
+        // eligibility, so changing Show on never needs to rewrite the user's saved choices.
         for controller in controllers.values { controller.refreshSampling() }
     }
 
