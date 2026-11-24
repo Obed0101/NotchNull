@@ -3,7 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case general, style, motion, layout, activities, agents, files, build, permissions, about, setup
+        case general, displays, style, motion, layout, activities, agents, files, build, permissions, about, setup
 
         /// Setup is a first-launch flow, reopened from General or About, so it stays out of the sidebar.
         static let sidebar = allCases.filter { $0 != .setup }
@@ -12,6 +12,7 @@ struct SettingsView: View {
         var title: String {
             switch self {
             case .setup: "Setup"
+            case .displays: "Displays"
             case .style: "Style"
             case .motion: "Motion"
             case .layout: "Tabs & Wings"
@@ -27,6 +28,7 @@ struct SettingsView: View {
         var symbol: String {
             switch self {
             case .setup: "wand.and.stars"
+            case .displays: "display"
             case .style: "paintbrush.pointed.fill"
             case .motion: "wind"
             case .layout: "square.stack.3d.up.fill"
@@ -42,6 +44,7 @@ struct SettingsView: View {
         var tint: Color {
             switch self {
             case .setup: Theme.Accent.claude
+            case .displays: Theme.Accent.system
             case .style: Theme.Accent.mirror
             case .motion: Theme.Accent.awake
             case .layout: Theme.Accent.codex
@@ -152,6 +155,7 @@ struct SettingsView: View {
     private var content: some View {
         switch section {
         case .setup: SetupSettings()
+        case .displays: DisplaySettings()
         case .style: StyleSettings()
         case .motion: MotionSettings()
         case .layout: LayoutSettings()
@@ -285,7 +289,6 @@ private struct GeneralSettings: View {
         if let loginError {
             Text(loginError).font(.system(size: 11)).foregroundStyle(Theme.Accent.danger)
         }
-        DisplaySettings()
         SettingsGroup(title: "Extras") {
             SettingsToggle(title: "Sounds", subtitle: "Timer chime and meeting reminder.", symbol: "speaker.wave.2.fill", tint: Theme.Accent.volumeHigh, isOn: $preferences.sounds)
             SettingsToggle(title: "Say hello", subtitle: "Handwritten hello at launch and when you unlock.", symbol: "hand.wave.fill", tint: Theme.Accent.mirror, isOn: $preferences.sayHello)

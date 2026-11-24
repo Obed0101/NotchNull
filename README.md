@@ -37,7 +37,7 @@ It is free, open source and runs entirely on your Mac.
 
 The first launch opens **Settings › Setup**: pick a shape (**classic notch**, floating **island**, or **automatic**), then **Minimal**, **Balanced** or **Complete** (everything, the way it ships) and one of twelve looks. None of it is fixed. Each preset and look is a JSON file, and after you pick one, your agent can change anything.
 
-**Island mode.** Set a MacBook to a resolution that leaves the notch area out (or use a screen without one) and NotchNull floats as an island inside the menu bar: a clock pill with two satellites that grow into a music card and Control Center on hover. Every activity and the panel work the same. Settings › Style › Shape forces either one.
+**Island mode.** Set a MacBook to a resolution that leaves the notch area out (or use a screen without one) and NotchNull floats as an island inside the menu bar: a clock pill with two satellites that grow into a music card and Control Center on hover. Every activity and the panel work the same. Settings › Style › Default shape forces either one.
 
 <p align="center">
   <img src="docs/images/shape-classic.png" width="620" alt="Classic notch at rest, with the playing song's artwork and audio bars in its wings">
@@ -112,7 +112,7 @@ Scripts can use the same surface: every CLI command is a call to a local API on 
 - Charging, low battery, and battery color that follows Low Power / High Power mode.
 - Devices: Bluetooth headphones and speakers with AirPods battery, keyboards, mice, controllers, **ESP32 / Arduino boards with their serial port**, drives, displays, AirDrop.
 - Downloads with progress, screenshots, timers (presets or any `HH:MM:SS`), meeting countdowns, a hello on login.
-- The notch slides out of the way on a display while a fullscreen app covers it, and slides back for agent alerts, notifications or a hover at the top edge, each display on its own (Settings › General).
+- The notch slides out of the way on a display while a fullscreen app covers it, and slides back for agent alerts, notifications or a hover at the top edge, each display on its own. Choose which enabled displays expand for attention, and turn the notch on or off per display, in **Settings › Displays**.
 
 **Downloads that clean themselves**
 - Each new download asks, right in the notch, how long to keep it: 10 minutes, an hour, a day, a week, 30 days, or Keep. Then it goes to the Trash, with Undo.

@@ -16,7 +16,7 @@ final class Preferences: ObservableObject {
             case .builtIn: "Built-in display"
             case .main: "Main display"
             case .all: "All displays"
-            case .selected: "Selected displays"
+            case .selected: "Custom"
             }
         }
     }
@@ -27,6 +27,23 @@ final class Preferences: ObservableObject {
         var title: String { self == .hover ? "Hover" : "Click" }
     }
 
+    /// Which notch-enabled displays may expand for attention activities.
+    enum AttentionDisplayMode: String, Codable, CaseIterable, Identifiable {
+        case enabled
+        /// Follow the Show on set: one display for Built-in, Main or Selected; all for All.
+        case followDisplay
+        case selected
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .enabled: "All enabled displays"
+            case .followDisplay: "Same as Show on"
+            case .selected: "Selected"
+            }
+        }
+    }
+
+    // MARK: Look
     enum BodyStyle: String, CaseIterable, Identifiable {
         case black, glass, tinted
         var id: String { rawValue }
@@ -155,10 +172,17 @@ final class Preferences: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
-    // MARK: Look
+    // MARK: Displays
     @Published var displayMode: DisplayMode { didSet { defaults.set(displayMode.rawValue, forKey: Keys.displayMode) } }
     @Published var selectedDisplays: [String] { didSet { defaults.set(selectedDisplays, forKey: "selectedDisplays") } }
+    /// Attention expansion always follows the notch-enabled displays. Selected narrows that set.
+    @Published var attentionDisplayMode: AttentionDisplayMode { didSet { defaults.set(attentionDisplayMode.rawValue, forKey: Keys.attentionDisplayMode) } }
+    @Published var attentionDisplays: [String] { didSet { defaults.set(attentionDisplays, forKey: Keys.attentionDisplays) } }
+
+    // MARK: Interaction
     @Published var openTrigger: OpenTrigger { didSet { defaults.set(openTrigger.rawValue, forKey: Keys.openTrigger) } }
+
+    // MARK: Look
     @Published var bodyStyle: BodyStyle { didSet { defaults.set(bodyStyle.rawValue, forKey: Keys.bodyStyle) } }
     @Published var tintHex: Int { didSet { defaults.set(tintHex, forKey: Keys.tintHex) } }
     @Published var accentHex: Int { didSet { defaults.set(accentHex, forKey: Keys.accentHex) } }
@@ -284,6 +308,7 @@ final class Preferences: ObservableObject {
 
     enum Keys {
         static let displayMode = "displayMode", openTrigger = "openTrigger"
+        static let attentionDisplayMode = "attentionDisplayMode", attentionDisplays = "attentionDisplays"
         static let bodyStyle = "bodyStyle", tintHex = "tintHex", accentHex = "accentHex", bodyOpacity = "bodyOpacity"
         static let panelWidth = "panelWidth.v2", panelHeight = "panelHeight.v2", cornerScale = "cornerScale", shadow = "shadow"
         static let closedExtraWidth = "closedExtraWidth", activityWidthScale = "activityWidthScale.v2"
@@ -314,6 +339,7 @@ final class Preferences: ObservableObject {
     static let factoryDefaults: [String: Any] = [
         Keys.emissionIntensity: 0.7, Keys.glowNeedsYou: true, Keys.hideNotch: false, Keys.paceWarnings: true,
         Keys.usageShowsRemaining: true, Keys.planUsageShowsRemaining: false, Keys.tabSwipe: true, Keys.hideOnFullscreen: true,
+        Keys.attentionDisplayMode: AttentionDisplayMode.enabled.rawValue, Keys.attentionDisplays: [],
         Keys.revealAlertsOnFullscreen: true, Keys.checkForUpdates: true,
         Keys.panelWidth: 500.0, Keys.panelHeight: 148.0, Keys.closedExtraWidth: 0.0, Keys.activityWidthScale: 1.0,
         Keys.bodyOpacity: 1.0, Keys.cornerScale: 1.0, Keys.shadow: true,
@@ -346,6 +372,8 @@ final class Preferences: ObservableObject {
         }
         displayMode = DisplayMode(rawValue: defaults.string(forKey: Keys.displayMode) ?? "") ?? .builtIn
         selectedDisplays = defaults.stringArray(forKey: "selectedDisplays") ?? []
+        attentionDisplayMode = AttentionDisplayMode(rawValue: defaults.string(forKey: Keys.attentionDisplayMode) ?? "") ?? .enabled
+        attentionDisplays = defaults.stringArray(forKey: Keys.attentionDisplays) ?? []
         openTrigger = OpenTrigger(rawValue: defaults.string(forKey: Keys.openTrigger) ?? "") ?? .hover
         bodyStyle = BodyStyle(rawValue: defaults.string(forKey: Keys.bodyStyle) ?? "") ?? .black
         tintHex = defaults.integer(forKey: Keys.tintHex)

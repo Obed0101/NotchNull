@@ -127,13 +127,16 @@ final class PlatformTests: XCTestCase {
     // MARK: Settings file
 
     @MainActor
-    func testEverySettingHasASectionedUniqueKeyInTheReference() {
+    func testEverySettingHasASectionedUniqueKeyInTheReference() throws {
         let keys = SettingsFile.fields.map(\.key)
         XCTAssertEqual(Set(keys).count, keys.count)
         for key in keys {
             XCTAssertEqual(key.split(separator: ".").count, 2, key)
             XCTAssertTrue(SettingsFile.reference.contains("`\(key)`"), key)
         }
+        let snapshot = try JSONSerialization.data(withJSONObject: SettingsFile.shared.snapshot().any, options: [.sortedKeys])
+        let roundTrip = JSONValue.parse(snapshot)
+        XCTAssertEqual(roundTrip, SettingsFile.shared.snapshot())
     }
 
     @MainActor

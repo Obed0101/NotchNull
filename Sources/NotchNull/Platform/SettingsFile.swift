@@ -220,15 +220,27 @@ final class SettingsFile: ObservableObject {
     ]
 
     private static let behavior: [SettingField] = [
-        choice("behavior.display", "Which displays get a notch. Selected uses behavior.selectedDisplays.", \.displayMode),
+        choice("behavior.display", "Which displays get a notch. Custom uses behavior.selectedDisplays.", \.displayMode),
         SettingField(
-            key: "behavior.selectedDisplays", type: "list of display UUIDs", summary: "Displays enabled in Selected mode. IDs are listed in status.displays and survive reconnects. An empty list hides every panel.",
+            key: "behavior.selectedDisplays", type: "list of display UUIDs", summary: "Displays enabled in Custom mode. IDs are listed in status.displays and survive reconnects. An empty list hides every panel.",
             read: { .array($0.selectedDisplays.map { .string($0) }) },
             write: { prefs, value in
                 guard let entries = value.array, entries.allSatisfy({ $0.string.flatMap(UUID.init(uuidString:)) != nil }) else {
                     return "expected a list of display UUIDs"
                 }
                 prefs.selectedDisplays = Array(Set(entries.compactMap(\.string).map { $0.uppercased() })).sorted()
+                return nil
+            }
+        ),
+        choice("behavior.attentionDisplay", "Which notch-enabled displays expand for attention: all enabled, the same set as Show NotchNull on (one display for Built-in, Main or Custom; all for All), or selected displays in behavior.attentionDisplays. Hover and explicit open still reveal on other displays.", \.attentionDisplayMode),
+        SettingField(
+            key: "behavior.attentionDisplays", type: "list of display UUIDs", summary: "Displays allowed to expand for attention in Selected mode. Effective targets are always a subset of the displays that currently get a notch; IDs survive reconnects. An empty list keeps attention expansion off everywhere.",
+            read: { .array($0.attentionDisplays.map { .string($0) }) },
+            write: { prefs, value in
+                guard let entries = value.array, entries.allSatisfy({ $0.string.flatMap(UUID.init(uuidString:)) != nil }) else {
+                    return "expected a list of display UUIDs"
+                }
+                prefs.attentionDisplays = Array(Set(entries.compactMap(\.string).map { $0.uppercased() })).sorted()
                 return nil
             }
         ),

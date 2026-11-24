@@ -16,7 +16,7 @@ final class NotchCoordinator {
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.rebuild() }
+            .sink { [weak self] _ in self?.displaysChanged() }
             .store(in: &cancellables)
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
@@ -24,15 +24,22 @@ final class NotchCoordinator {
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &cancellables)
-        Preferences.shared.$displayMode
+        Publishers.CombineLatest(Preferences.shared.$displayMode, Preferences.shared.$selectedDisplays)
             .dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.rebuild() } }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.refreshAttentionSampling()
+                self.rebuild()
+            }
             .store(in: &cancellables)
-        Preferences.shared.$selectedDisplays
+        Publishers.CombineLatest(Preferences.shared.$attentionDisplayMode, Preferences.shared.$attentionDisplays)
             .dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.rebuild() } }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.refreshAttentionSampling()
+            }
             .store(in: &cancellables)
         services.fullscreen.$fullscreenDisplayIDs
             .receive(on: RunLoop.main)
@@ -69,9 +76,10 @@ final class NotchCoordinator {
 
     private func makeController(screen: NSScreen, model: NotchViewModel? = nil) -> NotchWindowController {
         let id = NotchGeometry.screenID(screen)
+        let persistentID = NotchDisplay.persistentID(for: screen)
         return NotchWindowController(screen: screen, services: services, model: model,
             onWindowFailure: { [weak self] in self?.replaceFailedWindow(on: id) },
-            onConcealmentChange: { NotchStatus.write() })
+            onConcealmentChange: { NotchStatus.write(attentionDisplayID: persistentID) })
     }
 
     private func replaceFailedWindow(on id: CGDirectDisplayID) {
@@ -99,6 +107,17 @@ final class NotchCoordinator {
     func toggleClipboard() {
         guard Preferences.shared.clipboardEnabled, !Preferences.shared.hiddenTabs.contains(NotchTab.clipboard.rawValue) else { return }
         primaryController?.toggleClipboardFromKeyboard()
+    }
+
+    private func displaysChanged() {
+        refreshAttentionSampling()
+        rebuild()
+    }
+
+    private func refreshAttentionSampling() {
+        // Saved attention membership is persistent. Each model intersects it with current notch
+        // eligibility, so changing Show on never needs to rewrite the user's saved choices.
+        for controller in controllers.values { controller.refreshSampling() }
     }
 
     private func eligibleScreens() -> [NSScreen] {

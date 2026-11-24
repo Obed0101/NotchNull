@@ -91,6 +91,8 @@ final class NotchViewModel: ObservableObject {
         self.displayID = displayID
         self.center = center
         self.customActivities = customActivities
+        let connected = NotchDisplay.connected
+        refreshAttentionExpansion(connected: connected)
         center.$current
             .receive(on: RunLoop.main)
             .sink { [weak self] kind in self?.activityChanged(kind) }
@@ -113,12 +115,6 @@ final class NotchViewModel: ObservableObject {
                     self?.refreshActivityPresentation(animated: true)
                 }
             }
-            .store(in: &cancellables)
-        // Automatic reveals are optional; hover and explicit open keep working either way.
-        preferences.$revealAlertsOnFullscreen
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refreshActivityPresentation(animated: true) }
             .store(in: &cancellables)
         // Changing a display's shape or the satellites changes what the body shows.
         Publishers.CombineLatest3(preferences.$shapeStyle, preferences.$displayShapes, preferences.$islandSatellites)
@@ -663,7 +659,8 @@ final class NotchViewModel: ObservableObject {
         satellite: SatelliteSide? = nil,
         fittedPanelHeights: [NotchTab: CGFloat] = [:],
         fullscreenActive: Bool = false,
-        pointerInside: Bool = false
+        pointerInside: Bool = false,
+        attentionExpansion: Bool = true
     ) {
         self.phase = phase
         selectedTab = tab
@@ -671,6 +668,15 @@ final class NotchViewModel: ObservableObject {
         requestedPanelHeights = fittedPanelHeights
         isFullscreenActive = fullscreenActive
         isPointerInside = pointerInside
+        attentionExpansionEnabled = attentionExpansion
+        if fullscreenActive, case .activity(let kind) = phase {
+            let isAlert = kind == .custom
+                ? customActivities.current?.expiresAt != nil
+                : kind.fullscreenPresence == .alert
+            activityReveals = preferences.revealAlertsOnFullscreen && attentionExpansion && isAlert
+        } else {
+            activityReveals = false
+        }
     }
 
     private func activityChanged(_ kind: ActivityKind?) {
@@ -682,14 +688,39 @@ final class NotchViewModel: ObservableObject {
     /// what the body shows without waiting for a new event.
     private var incomingActivity: ActivityKind?
 
+    /// Whether this display may auto-expand for attention. Manual hover and open are independent.
+    var allowsAttentionExpansion: Bool { attentionExpansionEnabled }
+
+    /// Preference changes are sampled once per runloop turn by all panels. Keeping the result lets
+    /// SwiftUI and status readers see the new permission even when concealment itself does not change.
+    private var attentionExpansionEnabled = true {
+        didSet { guard attentionExpansionEnabled != oldValue else { return }; objectWillChange.send() }
+    }
+
+    private func refreshAttentionExpansion(connected: [NotchDisplay]? = nil) {
+        let connectedDisplays = connected ?? NotchDisplay.connected
+        attentionExpansionEnabled = DisplaySelection.allowsAttention(
+            displayID: displayID,
+            displays: connectedDisplays,
+            displayMode: preferences.displayMode,
+            selected: preferences.selectedDisplays,
+            attentionMode: preferences.attentionDisplayMode,
+            attentionSelected: preferences.attentionDisplays,
+            fallbackScreenFrame: geometry.screenFrame,
+            connected: connectedDisplays
+        )
+    }
+
     /// Re-derives the body content. In fullscreen an attention activity can outrank the normal
     /// winner; hover and normal display still use the ordinary priority.
     private func refreshActivityPresentation(animated: Bool) {
+        refreshAttentionExpansion()
         let alert = fullscreenAlertActivity()
         let base = isFullscreenActive ? (alert ?? incomingActivity) : incomingActivity
         // Music lives in the island's satellite, so it is not shown in the pill there.
         let presented = base == .music && showsMusicSatellite ? nil : base
-        let reveals = isFullscreenActive && preferences.revealAlertsOnFullscreen && alert != nil
+        let reveals = isFullscreenActive && preferences.revealAlertsOnFullscreen
+            && allowsAttentionExpansion && alert != nil
         let presentedChanged = presented != activity
         let revealsChanged = reveals != activityReveals
         guard presentedChanged || revealsChanged else { return }

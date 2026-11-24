@@ -22,18 +22,38 @@ final class FullscreenConcealmentTests: XCTestCase {
 
     private func withShape(_ style: Preferences.ShapeStyle, _ check: (String) throws -> Void) rethrows {
         let id = "TEST-\(UUID().uuidString)"
+        let screenID = NotchDisplay.connected.first?.persistentID ?? id
         let saved = Preferences.shared.displayShapes
-        Preferences.shared.displayShapes[id] = Preferences.DisplayShape(style: style)
+        Preferences.shared.displayShapes[screenID] = Preferences.DisplayShape(style: style)
         defer { Preferences.shared.displayShapes = saved }
-        try check(id)
+        try check(screenID)
     }
 
     private func withShapeAsync(_ style: Preferences.ShapeStyle, _ check: (String) async throws -> Void) async rethrows {
         let id = "TEST-\(UUID().uuidString)"
+        let screenID = NotchDisplay.connected.first?.persistentID ?? id
         let saved = Preferences.shared.displayShapes
-        Preferences.shared.displayShapes[id] = Preferences.DisplayShape(style: style)
+        Preferences.shared.displayShapes[screenID] = Preferences.DisplayShape(style: style)
         defer { Preferences.shared.displayShapes = saved }
-        try await check(id)
+        try await check(screenID)
+    }
+
+    /// Older fullscreen behavior tests exercise the reveal pipeline, not display selection. Keep
+    /// them independent from whatever attention subset the user has saved.
+    private func withAutomaticAttention(_ check: (String) async throws -> Void) async rethrows {
+        let prefs = Preferences.shared
+        let saved = (prefs.displayMode, prefs.selectedDisplays, prefs.attentionDisplayMode, prefs.attentionDisplays)
+        prefs.displayMode = .all
+        prefs.selectedDisplays = []
+        prefs.attentionDisplayMode = .enabled
+        prefs.attentionDisplays = []
+        defer {
+            prefs.attentionDisplays = saved.3
+            prefs.attentionDisplayMode = saved.2
+            prefs.selectedDisplays = saved.1
+            prefs.displayMode = saved.0
+        }
+        try await withShapeAsync(.notch, check)
     }
 
     /// Wait for a state transition instead of assuming a fixed sleep is enough under CI load.
@@ -216,7 +236,7 @@ final class FullscreenConcealmentTests: XCTestCase {
         defer { Preferences.shared.revealAlertsOnFullscreen = saved }
 
         let center = ActivityCenter()
-        await withShapeAsync(.notch) { id in
+        await withAutomaticAttention { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
             model.setFullscreenActive(true)
             center.post(.agentDone, for: 10)
@@ -236,7 +256,7 @@ final class FullscreenConcealmentTests: XCTestCase {
         defer { Preferences.shared.revealAlertsOnFullscreen = saved }
 
         let center = ActivityCenter()
-        await withShapeAsync(.notch) { id in
+        await withAutomaticAttention { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
             model.setFullscreenActive(true)
             center.post(.agentDone, for: 0.2)
@@ -253,7 +273,7 @@ final class FullscreenConcealmentTests: XCTestCase {
 
         let center = ActivityCenter()
         center.setPersistent(.custom, active: true)
-        await withShapeAsync(.notch) { id in
+        await withAutomaticAttention { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
             model.setFullscreenActive(true)
             center.post(.agentDone, for: 10)
@@ -293,7 +313,7 @@ final class FullscreenConcealmentTests: XCTestCase {
 
         let center = ActivityCenter()
         let store = CustomActivityStore(center: center, writesStatus: false)
-        try? await withShapeAsync(.notch) { id in
+        try? await withAutomaticAttention { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center, customActivities: store)
             model.setFullscreenActive(true)
             XCTAssertTrue(model.isConcealed)
@@ -321,6 +341,124 @@ final class FullscreenConcealmentTests: XCTestCase {
         }
     }
 
+    func testPermissionIsObservableBeforeTheFirstActivity() async {
+        let prefs = Preferences.shared
+        let savedMode = prefs.attentionDisplayMode
+        let savedDisplays = prefs.attentionDisplays
+        defer { prefs.attentionDisplayMode = savedMode; prefs.attentionDisplays = savedDisplays }
+        prefs.attentionDisplayMode = .selected
+        prefs.attentionDisplays = []
+
+        let model = NotchViewModel(geometry: notchGeometry(), displayID: "", center: ActivityCenter())
+        await waitUntil { !model.allowsAttentionExpansion }
+        XCTAssertFalse(model.allowsAttentionExpansion)
+    }
+
+    func testPreviewHonorsAttentionExpansionInFullscreen() {
+        let savedAlerts = Preferences.shared.revealAlertsOnFullscreen
+        Preferences.shared.revealAlertsOnFullscreen = true
+        defer { Preferences.shared.revealAlertsOnFullscreen = savedAlerts }
+
+        withShape(.notch) { id in
+            let allowed = NotchViewModel(geometry: notchGeometry(), displayID: id, center: ActivityCenter())
+            allowed.preview(phase: .activity(.needsYou), fullscreenActive: true, attentionExpansion: true)
+            XCTAssertFalse(allowed.isConcealed)
+            XCTAssertEqual(allowed.revealReason, .activity)
+
+            let blocked = NotchViewModel(geometry: notchGeometry(), displayID: id, center: ActivityCenter())
+            blocked.preview(phase: .activity(.needsYou), fullscreenActive: true, attentionExpansion: false)
+            XCTAssertTrue(blocked.isConcealed)
+            XCTAssertNil(blocked.revealReason)
+
+            let manual = NotchViewModel(geometry: notchGeometry(), displayID: id, center: ActivityCenter())
+            manual.preview(phase: .closed, fullscreenActive: true, pointerInside: true, attentionExpansion: false)
+            XCTAssertFalse(manual.isConcealed)
+            XCTAssertEqual(manual.revealReason, .hover)
+
+            let explicit = NotchViewModel(geometry: notchGeometry(), displayID: id, center: ActivityCenter())
+            explicit.preview(phase: .closed, fullscreenActive: true, attentionExpansion: false)
+            explicit.open()
+            XCTAssertFalse(explicit.isConcealed)
+            XCTAssertEqual(explicit.revealReason, .open)
+        }
+    }
+
+    func testAttentionDisplaySelectionGatesAutomaticRevealOnly() async {
+        let savedMode = Preferences.shared.attentionDisplayMode
+        let savedDisplays = Preferences.shared.attentionDisplays
+        let savedAlerts = Preferences.shared.revealAlertsOnFullscreen
+        let savedDisplayMode = Preferences.shared.displayMode
+        let savedSelectedDisplays = Preferences.shared.selectedDisplays
+        defer {
+            Preferences.shared.attentionDisplayMode = savedMode
+            Preferences.shared.attentionDisplays = savedDisplays
+            Preferences.shared.revealAlertsOnFullscreen = savedAlerts
+            Preferences.shared.displayMode = savedDisplayMode
+            Preferences.shared.selectedDisplays = savedSelectedDisplays
+        }
+        Preferences.shared.displayMode = .all
+        Preferences.shared.selectedDisplays = []
+        Preferences.shared.revealAlertsOnFullscreen = true
+        Preferences.shared.attentionDisplayMode = .selected
+        Preferences.shared.attentionDisplays = []
+
+        let center = ActivityCenter()
+        center.post(.agentDone, for: 60)
+        await withShapeAsync(.notch) { id in
+            let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
+            model.setFullscreenActive(true)
+            await waitUntil { model.phase == .activity(.agentDone) }
+            XCTAssertFalse(model.activityReveals)
+            XCTAssertTrue(model.isConcealed)
+
+            let strip = model.wakeStripRect
+            XCTAssertTrue(model.pointerMoved(to: CGPoint(x: strip.midX, y: strip.midY)))
+            await waitUntil { model.phase == .open }
+            XCTAssertEqual(model.phase, .open)
+            XCTAssertFalse(model.isConcealed)
+            model.close()
+        }
+        center.dismiss(.agentDone)
+    }
+
+    func testAttentionDisplayChangesApplyToExistingModels() async {
+        let savedMode = Preferences.shared.attentionDisplayMode
+        let savedDisplays = Preferences.shared.attentionDisplays
+        let savedAlerts = Preferences.shared.revealAlertsOnFullscreen
+        let savedDisplayMode = Preferences.shared.displayMode
+        let savedSelectedDisplays = Preferences.shared.selectedDisplays
+        defer {
+            Preferences.shared.attentionDisplayMode = savedMode
+            Preferences.shared.attentionDisplays = savedDisplays
+            Preferences.shared.revealAlertsOnFullscreen = savedAlerts
+            Preferences.shared.displayMode = savedDisplayMode
+            Preferences.shared.selectedDisplays = savedSelectedDisplays
+        }
+        Preferences.shared.displayMode = .all
+        Preferences.shared.selectedDisplays = []
+        Preferences.shared.revealAlertsOnFullscreen = true
+        Preferences.shared.attentionDisplayMode = .selected
+        Preferences.shared.attentionDisplays = []
+
+        let center = ActivityCenter()
+        center.post(.agentDone, for: 60)
+        await withShapeAsync(.notch) { id in
+            let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
+            model.setFullscreenActive(true)
+            await waitUntil { model.phase == .activity(.agentDone) }
+            XCTAssertFalse(model.activityReveals)
+
+            Preferences.shared.attentionDisplays = [id]
+            await waitUntil { model.activityReveals }
+            XCTAssertFalse(model.isConcealed)
+
+            Preferences.shared.attentionDisplays = []
+            await waitUntil { model.isConcealed }
+            XCTAssertFalse(model.activityReveals)
+        }
+        center.dismiss(.agentDone)
+    }
+
     func testRevealAlertsSettingGatesAutomaticReveal() async {
         let saved = Preferences.shared.revealAlertsOnFullscreen
         defer { Preferences.shared.revealAlertsOnFullscreen = saved }
@@ -328,7 +466,7 @@ final class FullscreenConcealmentTests: XCTestCase {
 
         let center = ActivityCenter()
         center.post(.agentDone, for: 60)
-        await withShapeAsync(.notch) { id in
+        await withAutomaticAttention { id in
             let model = NotchViewModel(geometry: notchGeometry(), displayID: id, center: center)
             model.setFullscreenActive(true)
             try? await Task.sleep(for: .milliseconds(120))
